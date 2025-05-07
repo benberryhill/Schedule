@@ -49,6 +49,7 @@ class Schedule:
         self.employees_needed = {day: [] for day in days}  # Initialize employees_needed
         self.schedule = {day: [] for day in days}
         self.unassigned_employees = {day: [] for day in days}  # Track unassigned employees per day
+        self.final_schedule = {day: [] for day in days}
 
     def set_employees_needed(self, employees_needed):
         """Set the number of employees needed for each day."""
@@ -307,7 +308,7 @@ class ScheduleWindow:
         top_frame.pack(side=tk.TOP, fill=tk.X)
 
         # Dropdown for selecting Excel file
-        self.file_selection = ttk.Combobox(top_frame, values=self.get_excel_files(), state='readonly')
+        self.file_selection = ttk.Combobox(top_frame, values=self.get_excel_files(), state='readonly', width=48)
         self.file_selection.set("Select Employee Excel Sheet")
         self.file_selection.pack(side=tk.LEFT, padx=10)
 
@@ -317,6 +318,10 @@ class ScheduleWindow:
         # Generate Schedule Button
         self.generate_schedule_button = tk.Button(top_frame, text="Generate Schedule", command=self.generate_schedule)
         self.generate_schedule_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+        # Push changes to final schedule
+        self.push_to_final_button = tk.Button(top_frame, text="Push Changes To Final Schedule", command=self.push_changes_to_final_schedule)
+        self.push_to_final_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Main frame for schedules
         main_frame = ttk.Frame(master)
@@ -390,6 +395,9 @@ class ScheduleWindow:
             self.finalized_tree.column(day, width=80, anchor="center", stretch=True)
         self.finalized_tree.tag_configure('oddrow', background='#f0f0ff')
         self.finalized_tree.tag_configure('evenrow', background='#ffffff')
+        self.finalized_tree.tag_configure('highlight', background='lightblue')
+        self.finalized_tree.bind("<Double-1>", self.on_final_schedule_double_click)
+        self.finalized_tree.bind("<Button-1>", self.on_final_schedule_single_click)
 
         # Set Employees Needed Frame
         set_employees_needed_frame = ttk.Frame(preview_frame)
@@ -478,6 +486,68 @@ class ScheduleWindow:
             self.refresh_schedule_preview()
             self.refresh_unassigned_employees()
 
+    def on_final_schedule_double_click(self, event):
+        """Handle double-clicking on any employee in the final schedule to remove them."""
+        item_id = self.finalized_tree.identify_row(event.y)
+        if not item_id:
+            return  # No row selected
+
+        column = self.finalized_tree.identify_column(event.x)
+        column_index = int(column.replace('#', '')) - 1
+
+        item_values = self.finalized_tree.item(item_id, 'values')
+
+        if column_index == 0:
+            return  # Ignore row number column
+
+        selected_employee = item_values[column_index]
+        if not selected_employee:
+            return  # Empty cell
+
+        selected_day = self.days[column_index - 1]
+
+        confirm = messagebox.askyesno("Remove Employee", f"Do you want to remove {selected_employee} from {selected_day} in the final schedule?")
+
+        if confirm:
+            # Find and remove the employee object
+            final_employees = self.schedule.final_schedule[selected_day]
+            self.schedule.final_schedule[selected_day] = [
+                emp for emp in final_employees if emp.name != selected_employee
+            ]
+
+            self.refresh_finalized_schedule()
+
+    def on_final_schedule_single_click(self, event):
+        """Highlight all cells in the final schedule for the selected employee, and remove highlight on unrelated clicks."""
+        # Identify clicked row and column
+        item_id = self.finalized_tree.identify_row(event.y)
+        column = self.finalized_tree.identify_column(event.x)
+
+        # Always clear previous highlights first
+        for item in self.finalized_tree.get_children():
+            self.finalized_tree.item(item, tags=())
+
+        if not item_id or column == '#0':
+            return
+
+        column_index = int(column.replace('#', '')) - 1
+        item_values = self.finalized_tree.item(item_id, 'values')
+
+        if column_index == 0 or column_index >= len(item_values):
+            return
+
+        selected_employee = item_values[column_index]
+        if not selected_employee:
+            return
+
+        # Apply highlight to all rows where this employee appears
+        for row_id in self.finalized_tree.get_children():
+            values = self.finalized_tree.item(row_id, 'values')
+            for name in values[1:]:  # skip index column
+                if name == selected_employee:
+                    self.finalized_tree.item(row_id, tags=('highlight',))
+                    break
+
     def get_excel_files(self):
         """Retrieve all available Excel files for selection."""
         excel_dir = os.path.join(os.getcwd(), "excel_sheets")  # Assuming excel files are in an 'excel_sheets' folder
@@ -543,6 +613,23 @@ class ScheduleWindow:
             # Add the employee back to the unassigned list for that day
             self.schedule.unassigned_employees[day].append(employee) 
 
+    def push_changes_to_final_schedule(self):
+        """Push assigned employees to final schedule without overwriting existing entries."""
+        for day in self.days:
+            assigned_employees = self.schedule.schedule[day]
+            final_employees = self.schedule.final_schedule[day]
+
+            # Only add new employees who are not already in the final list
+            for emp in assigned_employees:
+                if emp not in final_employees:
+                    final_employees.append(emp)
+
+            # Sort in-place after adding
+            self.schedule.final_schedule[day] = sorted(final_employees, key=lambda emp: emp.name.lower())
+
+        # Refresh the finalized schedule treeview
+        self.refresh_finalized_schedule()
+
     def refresh_schedule_preview(self):
         """Refresh the schedule preview treeview with current assignments."""
         self.schedule_tree.delete(*self.schedule_tree.get_children())  # Clear existing rows
@@ -601,6 +688,23 @@ class ScheduleWindow:
             self.unassigned_tree.insert('', 'end', values=[i + 1] + row, tags=(tag,)) #create each row with a num, names, and tags(colored lines)
 
         print("Unassigned employees treeview refreshed.")  # Debug output
+
+    def refresh_finalized_schedule(self):
+        """Copy current assigned schedule to the finalized schedule treeview."""
+        self.finalized_tree.delete(*self.finalized_tree.get_children())  # Clear existing rows
+
+        max_employees = max(len(self.schedule.final_schedule[day]) for day in self.days)
+
+        for i in range(max_employees):
+            row_values = []
+            for day in self.days:
+                employees = sorted(self.schedule.final_schedule[day], key=lambda emp: emp.name.lower())
+                if i < len(employees):
+                    row_values.append(employees[i].name)
+                else:
+                    row_values.append('')
+            tag = 'oddrow' if i % 2 == 0 else 'evenrow'
+            self.finalized_tree.insert('', 'end', values=[i + 1] + row_values, tags=(tag,))
 
     def submit_employees_needed(self):
         """Submit the employees needed for each day."""
