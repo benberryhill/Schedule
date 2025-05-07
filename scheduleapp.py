@@ -3,6 +3,7 @@ import os
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox, scrolledtext
+from openpyxl import load_workbook, Workbook
 
 def load_employees_from_excel(file_path):
     """Load employees from an Excel file."""
@@ -319,9 +320,13 @@ class ScheduleWindow:
         self.generate_schedule_button = tk.Button(top_frame, text="Generate Schedule", command=self.generate_schedule)
         self.generate_schedule_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        # Push changes to final schedule
+        # Push changes to final schedule button
         self.push_to_final_button = tk.Button(top_frame, text="Push Changes To Final Schedule", command=self.push_changes_to_final_schedule)
         self.push_to_final_button.pack(side=tk.LEFT, padx=5, pady=5)
+
+        # Open employee manager window
+        self.employee_manager_button = tk.Button(top_frame, text="Manage Employees", command=self.open_manage_employees_window)
+        self.employee_manager_button.pack(side=tk.LEFT, padx=5, pady=5)
 
         # Main frame for schedules
         main_frame = ttk.Frame(master)
@@ -734,11 +739,284 @@ class ScheduleWindow:
         self.schedule.generate_schedule()
         self.refresh_schedule_preview()
 
-    """def create_employee_form(self):
-        # Create the EmployeeCreationWindow instance and pack it at the bottom
-        self.employee_creation_frame = EmployeeCreationWindow(self, self.schedule)
-        self.employee_creation_frame.pack(side='bottom', fill='x', padx=10, pady=10)
-"""
+    def open_manage_employees_window(self):
+        selected_file = self.file_selection.get()
+        if selected_file == "Select Employee Excel Sheet":
+            messagebox.showerror("Error", "Please select an Excel file first.")
+            return
+
+        file_path = os.path.join(os.getcwd(), "excel_sheets", selected_file)
+        deleted_file_path = os.path.join(os.getcwd(), "excel_sheets", "recently_deleted.xlsx")
+
+        # Create a workbook for recently_deleted.xlsx if it doesn't exist
+        if not os.path.exists(deleted_file_path):
+            wb = Workbook()
+            wb.save(deleted_file_path)
+
+        top = tk.Toplevel(self.master)
+        top.title("Manage Employees")
+        top.geometry("900x600")
+
+        # allow resizing
+        top.rowconfigure(1, weight=1)
+        top.columnconfigure(0, weight=1)
+
+        wb = load_workbook(file_path)
+        sheet = wb.active
+
+        employee_row_map = {}
+        left_tree = None
+        right_tree = None
+        left_employees = []
+        right_employees = []
+
+        # Treeview frame (row 0)
+        tree_frame = tk.Frame(top)
+        tree_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+        top.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.columnconfigure(1, weight=1)
+
+        # Left frame for left tree and its scrollbar
+        left_frame = tk.Frame(tree_frame)
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
+        left_frame.rowconfigure(0, weight=1)
+        left_frame.columnconfigure(0, weight=1)
+
+        left_tree = ttk.Treeview(left_frame, columns=("Name", "Availability"), show="headings")
+        left_tree.heading("Name", text="Name")
+        left_tree.heading("Availability", text="Available Days")
+        left_tree.grid(row=0, column=0, sticky="nsew")
+
+        left_scroll = ttk.Scrollbar(left_frame, orient="vertical", command=left_tree.yview)
+        left_tree.configure(yscrollcommand=left_scroll.set)
+        left_scroll.grid(row=0, column=1, sticky="ns")
+
+        # Right frame for right tree and its scrollbar
+        right_frame = tk.Frame(tree_frame)
+        right_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        tree_frame.columnconfigure(1, weight=1)
+        right_frame.rowconfigure(0, weight=1)
+        right_frame.columnconfigure(0, weight=1)
+
+        right_tree = ttk.Treeview(right_frame, columns=("Name", "Availability"), show="headings")
+        right_tree.heading("Name", text="Name")
+        right_tree.heading("Availability", text="Available Days")
+        right_tree.grid(row=0, column=0, sticky="nsew")
+
+        right_scroll = ttk.Scrollbar(right_frame, orient="vertical", command=right_tree.yview)
+        right_tree.configure(yscrollcommand=right_scroll.set)
+        right_scroll.grid(row=0, column=1, sticky="ns")
+
+        # Name entry (row 1)
+        entry_frame = tk.Frame(top)
+        entry_frame.grid(row=1, column=0, columnspan=2, pady=5)
+        name_entry = tk.Entry(entry_frame, width=30)
+        name_entry.pack()
+        top.rowconfigure(1, weight=0)
+        top.columnconfigure(0, weight=1)
+        top.columnconfigure(1, weight=1)
+
+        # Checkboxes (row 2)
+        check_vars = {day: tk.BooleanVar() for day in self.days}
+        check_frame = tk.Frame(top)
+        check_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10)
+        top.rowconfigure(2, weight=0)
+
+        inner_check_frame = tk.Frame(check_frame)
+        inner_check_frame.pack(anchor="center")
+        for day in self.days:
+            tk.Checkbutton(inner_check_frame, text=day, variable=check_vars[day]).pack(side=tk.LEFT, padx=5)
+
+        # Treeview row styling for odd rows
+        style = ttk.Style()
+        style.configure("Treeview", rowheight=25)
+        style.map("Treeview", background=[("selected", "#347083")])
+        left_tree.tag_configure("oddrow", background="#f0f0ff")
+        right_tree.tag_configure("oddrow", background="#f0f0ff")
+
+        def load_employees():
+            left_tree.delete(*left_tree.get_children())
+            right_tree.delete(*right_tree.get_children())
+            employee_row_map.clear()
+            all_employees = []
+
+            for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+                name = row[0]
+                available_days = [self.days[i] for i, val in enumerate(row[1:]) if val == "Yes"]
+                all_employees.append((name, ", ".join(available_days), idx))
+
+            midpoint = len(all_employees) // 2
+            left_employees[:] = all_employees[:midpoint]
+            right_employees[:] = all_employees[midpoint:]
+
+            for i, (name, days, row_idx) in enumerate(left_employees):
+                tag = "oddrow" if i % 2 == 1 else ""
+                left_tree.insert("", "end", values=(name, days), tags=(tag,))
+                employee_row_map[name] = row_idx
+            for i, (name, days, row_idx) in enumerate(right_employees):
+                tag = "oddrow" if i % 2 == 1 else ""
+                right_tree.insert("", "end", values=(name, days), tags=(tag,))
+                employee_row_map[name] = row_idx
+
+        def clear_selection():
+            for tree in [left_tree, right_tree]:
+                tree.selection_remove(tree.selection())
+            name_entry.delete(0, tk.END)
+            for var in check_vars.values():
+                var.set(False)
+
+        def on_select(event, tree):
+            selected = tree.selection()
+            if not selected:
+                return
+            name = tree.item(selected[0])["values"][0]
+            row_idx = employee_row_map.get(name)
+            if row_idx:
+                row = list(sheet.iter_rows(min_row=row_idx, max_row=row_idx, values_only=True))[0]
+                name_entry.delete(0, tk.END)
+                name_entry.insert(0, row[0])
+                for i, day in enumerate(self.days):
+                    check_vars[day].set(row[i + 1] == "Yes")
+
+            # Clear selection in the other tree
+            if tree == left_tree:
+                right_tree.selection_remove(right_tree.selection())
+            else:
+                left_tree.selection_remove(left_tree.selection())
+
+        left_tree.bind("<<TreeviewSelect>>", lambda e: on_select(e, left_tree))
+        right_tree.bind("<<TreeviewSelect>>", lambda e: on_select(e, right_tree))
+
+        def add_employee():
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showerror("Error", "Name cannot be empty.")
+                return
+            if any(row[0].value == name for row in sheet.iter_rows(min_row=2)):
+                messagebox.showerror("Error", "Employee already exists.")
+                return
+            new_row = [name] + [("Yes" if check_vars[day].get() else "") for day in self.days]
+            sheet.append(new_row)
+            wb.save(file_path)
+            load_employees()
+            clear_selection()
+
+        def delete_selected():
+            selected = left_tree.selection() or right_tree.selection()
+            if not selected:
+                return
+            tree = left_tree if selected in left_tree.selection() else right_tree
+            name_to_delete = tree.item(selected[0])["values"][0]
+
+            # Store deleted employee to the recently_deleted.xlsx file
+            deleted_employees = []
+            for idx, row in enumerate(sheet.iter_rows(min_row=2), start=2):
+                if row[0].value == name_to_delete:
+                    # Store the deleted employee's name and data
+                    deleted_employees.append((name_to_delete, row[1:]))  
+                    sheet.delete_rows(idx, 1)  # Delete the employee from the sheet
+                    break
+
+            if deleted_employees:
+                # Load the recently_deleted.xlsx file
+                deleted_wb = load_workbook(deleted_file_path)
+                deleted_sheet = deleted_wb.active
+
+                # Find the last row of the deleted employees file (to append)
+                last_row = deleted_sheet.max_row + 1
+
+                # Append the deleted employees to the deleted file
+                for employee in deleted_employees:
+                    deleted_sheet.append([employee[0]] + [cell.value for cell in employee[1]])
+
+                # Save the updated deleted employees workbook
+                deleted_wb.save(deleted_file_path)
+
+                # Save the updated main file (file_path) after deletion
+                wb.save(file_path)
+
+                load_employees()  # Reload employee data
+                clear_selection()  # Clear selection in the UI
+
+        def undo_delete():
+            deleted_wb = load_workbook(deleted_file_path)
+            deleted_sheet = deleted_wb.active
+
+            # Start from the bottom of the sheet and search for the last non-empty row
+            for row_num in range(deleted_sheet.max_row, 0, -1):
+                name_cell = deleted_sheet.cell(row=row_num, column=1)
+                if name_cell.value:  # Only proceed if name cell has data
+                    name = name_cell.value
+                    available_days = [
+                        deleted_sheet.cell(row=row_num, column=col).value for col in range(2, len(self.days) + 2)
+                    ]
+
+                    # Check if the employee already exists in the main sheet
+                    existing_names = [row[0].value for row in sheet.iter_rows(min_row=2)]
+                    if name not in existing_names:
+                        # Append to main sheet
+                        sheet.append([name] + available_days)
+
+                        # Delete the restored row from the deleted sheet
+                        deleted_sheet.delete_rows(row_num)
+
+                        # Save both workbooks
+                        deleted_wb.save(deleted_file_path)
+                        wb.save(file_path)
+
+                        # Update UI
+                        load_employees()
+                        clear_selection()
+                    else:
+                        messagebox.showinfo("Info", "Employee already exists in the main sheet.")
+                    return
+
+            # If no non-empty deleted rows were found
+            messagebox.showinfo("Info", "No deleted employees found to undo.")
+
+        def update_employee():
+            name = name_entry.get().strip()
+            if not name:
+                messagebox.showerror("Error", "Name cannot be empty.")
+                return
+            row_idx = employee_row_map.get(name)
+            if not row_idx:
+                messagebox.showerror("Error", "Employee not found.")
+                return
+            for i, day in enumerate(self.days):
+                value = "Yes" if check_vars[day].get() else ""
+                sheet.cell(row=row_idx, column=i + 2).value = value
+            wb.save(file_path)
+            load_employees()
+            clear_selection()
+
+        def on_click_inside(event):
+            # Prevent selection clearing if inside the treeview
+            widget = event.widget
+            if str(widget).startswith(str(left_tree)) or str(widget).startswith(str(right_tree)):
+                selected_item = widget.selection()
+                if selected_item:
+                    # Do nothing (keep the selection active)
+                    return
+
+        # Buttons
+        btn_frame = tk.Frame(top)
+        btn_frame.grid(row=3, column=0, columnspan=2, pady=5)
+        tk.Button(btn_frame, text="Add Employee", command=add_employee).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Update Employee", command=update_employee).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Delete Employee", command=delete_selected).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Undo Delete", command=undo_delete).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Close", command=top.destroy).pack(side=tk.LEFT, padx=5)
+
+        # Load existing employees
+        load_employees()
+
+        # Bind clicking outside to clear selection
+        top.bind("<Button-1>", on_click_inside)
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = ScheduleWindow(root)
