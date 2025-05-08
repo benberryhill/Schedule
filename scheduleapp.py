@@ -1,4 +1,5 @@
 import pandas as pd
+import math
 import os
 import tkinter as tk
 from tkinter import ttk
@@ -30,18 +31,21 @@ def load_employees_from_excel(file_path):
             'Fri': row.get('Fri') == "Yes",
             'Sat': row.get('Sat') == "Yes"
         }
-        print(f"Loaded Employee: {name}, Availability: {availability}")  # Debug output
-        employees.append(Employee(name, availability))
+
+        notes = row.get('Notes', '')
+        print(f"Loaded Employee: {name}, Availability: {availability}, Notes: {notes}")  # Debug output
+        employees.append(Employee(name, availability, notes))
 
     return employees
 
 class Employee:
-    def __init__(self, name, availability):
+    def __init__(self, name, availability, notes=""):
         self.name = name
         self.availability = availability  # availability as a dictionary {'Sun': True, 'Mon': False, ...}
+        self.notes = notes
 
     def __str__(self):
-        return f"Employee(name={self.name}, availability={self.availability})"
+        return f"Employee(name={self.name}, availability={self.availability}, notes={self.notes})"
 
 class Schedule:
     def __init__(self, days, employees):
@@ -303,52 +307,52 @@ class ScheduleWindow:
         self.days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
         self.employees = []
         self.schedule = Schedule(days=self.days, employees=[])
-        
+
+        self.master.columnconfigure(0, weight=1)
+        self.master.rowconfigure(1, weight=1)
+
         # Top frame for buttons
         top_frame = ttk.Frame(master)
-        top_frame.pack(side=tk.TOP, fill=tk.X)
+        top_frame.grid(row=0, column=0, columnspan=4, sticky="ew", padx=5, pady=5)
+        top_frame.columnconfigure(0, weight=1)
 
-        # Dropdown for selecting Excel file
+        # Dropdown
         self.file_selection = ttk.Combobox(top_frame, values=self.get_excel_files(), state='readonly', width=48)
         self.file_selection.set("Select Employee Excel Sheet")
-        self.file_selection.pack(side=tk.LEFT, padx=10)
-
-        # Bind selection event
+        self.file_selection.grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.file_selection.bind("<<ComboboxSelected>>", self.on_file_selected)
 
-        # Generate Schedule Button
+        # Buttons
         self.generate_schedule_button = tk.Button(top_frame, text="Generate Schedule", command=self.generate_schedule)
-        self.generate_schedule_button.pack(side=tk.LEFT, padx=5, pady=5)
+        self.generate_schedule_button.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
-        # Push changes to final schedule button
         self.push_to_final_button = tk.Button(top_frame, text="Push Changes To Final Schedule", command=self.push_changes_to_final_schedule)
-        self.push_to_final_button.pack(side=tk.LEFT, padx=5, pady=5)
+        self.push_to_final_button.grid(row=0, column=2, padx=5, pady=5)
 
-        # Open employee manager window
         self.employee_manager_button = tk.Button(top_frame, text="Manage Employees", command=self.open_manage_employees_window)
-        self.employee_manager_button.pack(side=tk.LEFT, padx=5, pady=5)
+        self.employee_manager_button.grid(row=0, column=3, padx=5, pady=5)
 
-        # Main frame for schedules
+        # Main frame
         main_frame = ttk.Frame(master)
-        main_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        main_frame.columnconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(0, weight=1)
+        main_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        for i in range(2): main_frame.columnconfigure(i, weight=1)
+        main_frame.rowconfigure(0, weight=1)  # Schedule and Finalized Treeviews
+        main_frame.rowconfigure(1, weight=1)  # Unassigned and Employee Treeviews
+        main_frame.rowconfigure(2, weight=0)  # Set Employees Needed stays small
 
-        # Left Preview Frame for Assigned and Unassigned
-        preview_frame = tk.Frame(main_frame)
-        preview_frame.grid(row=0, column=0, sticky="nsew")
-
-        ### Schedule Treeview with Scrollbar ###
-        schedule_frame = tk.Frame(preview_frame)
-        schedule_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Schedule Treeview
+        schedule_frame = ttk.Frame(main_frame)
+        schedule_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
         schedule_scroll = tk.Scrollbar(schedule_frame)
-        schedule_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        schedule_scroll.grid(row=0, column=1, sticky="ns")
 
         self.schedule_tree = ttk.Treeview(schedule_frame, columns=["Row"] + self.days, show="headings", height=15, yscrollcommand=schedule_scroll.set)
-        self.schedule_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.schedule_tree.grid(row=0, column=0, sticky="nsew")
         schedule_scroll.config(command=self.schedule_tree.yview)
+
+        schedule_frame.columnconfigure(0, weight=1)
+        schedule_frame.rowconfigure(0, weight=1)
 
         self.schedule_tree.heading("Row", text="#")
         self.schedule_tree.column("Row", width=30, anchor="center", stretch=True)
@@ -359,16 +363,19 @@ class ScheduleWindow:
         self.schedule_tree.tag_configure('evenrow', background='#ffffff')
         self.schedule_tree.bind("<Double-1>", self.on_schedule_double_click)
 
-        ### Unassigned Treeview with Scrollbar ###
-        unassigned_frame = tk.Frame(preview_frame)
-        unassigned_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Unassigned Treeview
+        unassigned_frame = ttk.Frame(main_frame)
+        unassigned_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
 
         unassigned_scroll = tk.Scrollbar(unassigned_frame)
-        unassigned_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        unassigned_scroll.grid(row=0, column=1, sticky="ns")
 
         self.unassigned_tree = ttk.Treeview(unassigned_frame, columns=["Row"] + self.days, show="headings", height=15, yscrollcommand=unassigned_scroll.set)
-        self.unassigned_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.unassigned_tree.grid(row=0, column=0, sticky="nsew")
         unassigned_scroll.config(command=self.unassigned_tree.yview)
+
+        unassigned_frame.columnconfigure(0, weight=1)
+        unassigned_frame.rowconfigure(0, weight=1)
 
         self.unassigned_tree.heading("Row", text="#")
         self.unassigned_tree.column("Row", width=30, anchor="center", stretch=True)
@@ -379,19 +386,19 @@ class ScheduleWindow:
         self.unassigned_tree.tag_configure('evenrow', background='#ffffff')
         self.unassigned_tree.bind("<Double-1>", self.on_unassigned_double_click)
 
-        ### Finalized Treeview with Scrollbar ###
+        # Finalized Treeview
         finalized_frame = ttk.Frame(main_frame)
-        finalized_frame.grid(row=0, column=1, sticky="nsew")
+        finalized_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
-        finalized_tree_frame = tk.Frame(finalized_frame)
-        finalized_tree_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        finalized_scroll = tk.Scrollbar(finalized_frame)
+        finalized_scroll.grid(row=0, column=1, sticky="ns")
 
-        finalized_scroll = tk.Scrollbar(finalized_tree_frame)
-        finalized_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.finalized_tree = ttk.Treeview(finalized_tree_frame, columns=["Row"] + self.days, show="headings", height=31, yscrollcommand=finalized_scroll.set)
-        self.finalized_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.finalized_tree = ttk.Treeview(finalized_frame, columns=["Row"] + self.days, show="headings", height=15, yscrollcommand=finalized_scroll.set)
+        self.finalized_tree.grid(row=0, column=0, sticky="nsew")
         finalized_scroll.config(command=self.finalized_tree.yview)
+
+        finalized_frame.columnconfigure(0, weight=1)
+        finalized_frame.rowconfigure(0, weight=1)
 
         self.finalized_tree.heading("Row", text="#")
         self.finalized_tree.column("Row", width=30, anchor="center", stretch=True)
@@ -404,26 +411,51 @@ class ScheduleWindow:
         self.finalized_tree.bind("<Double-1>", self.on_final_schedule_double_click)
         self.finalized_tree.bind("<Button-1>", self.on_final_schedule_single_click)
 
+        # Employee List Treeview
+        employee_list_frame = ttk.Frame(main_frame)
+        employee_list_frame.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
+
+        employee_scroll = tk.Scrollbar(employee_list_frame)
+        employee_scroll.grid(row=0, column=1, sticky="ns")
+
+        self.employee_list_tree = ttk.Treeview(employee_list_frame, columns=["Name", "Availability", "Notes"], show="headings", height=15, yscrollcommand=employee_scroll.set)
+        self.employee_list_tree.grid(row=0, column=0, sticky="nsew")
+        employee_scroll.config(command=self.employee_list_tree.yview)
+
+        employee_list_frame.columnconfigure(0, weight=1)
+        employee_list_frame.rowconfigure(0, weight=1)
+
+        self.employee_list_tree.heading("Name", text="Name")
+        self.employee_list_tree.column("Name", width=200, anchor="w", stretch=True)
+        self.employee_list_tree.heading("Availability", text="Available Days")
+        self.employee_list_tree.column("Availability", width=200, anchor="w", stretch=True)
+        self.employee_list_tree.heading("Notes", text="Notes")
+        self.employee_list_tree.column("Notes", width=200, anchor="w", stretch=True)
+        self.employee_list_tree.tag_configure('oddrow', background='#f0f0ff')
+        self.employee_list_tree.tag_configure('evenrow', background='#ffffff')
+
         # Set Employees Needed Frame
-        set_employees_needed_frame = ttk.Frame(preview_frame)
-        set_employees_needed_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+        set_employees_needed_frame = ttk.Frame(main_frame)
+        set_employees_needed_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
 
         # Set Employees Needed Label
         set_employees_needed_label = tk.Label(set_employees_needed_frame, text="Set Employees Needed", font=("Arial", 12, "bold"))
-        set_employees_needed_label.pack(anchor=tk.W)
+        set_employees_needed_label.grid(row=0, column=0, columnspan=14, sticky="w", pady=(0, 5))
 
-        # Example Entries for Days
+        # Entries for Each Day (placed in two rows if needed)
         self.employees_needed_entries = {}
-        for day in self.days:
+        for idx, day in enumerate(self.days):
+            col = idx % 7
+            row = 1 if idx < 7 else 2
             label = tk.Label(set_employees_needed_frame, text=f"{day}:")
-            label.pack(side=tk.LEFT, padx=5, pady=5)
+            label.grid(row=row, column=col*2, sticky="w", padx=(0, 2), pady=2)
             entry = tk.Entry(set_employees_needed_frame, width=5)
-            entry.pack(side=tk.LEFT, padx=5, pady=5)
-            self.employees_needed_entries[day] = entry  # Store entry for later use
+            entry.grid(row=row, column=col*2 + 1, sticky="w", padx=(0, 5), pady=2)
+            self.employees_needed_entries[day] = entry
 
-        # Submit Button for Setting Employees Needed
+        # Submit Button aligned under the entry fields
         self.submit_needed_button = tk.Button(set_employees_needed_frame, text="Submit", command=self.submit_employees_needed)
-        self.submit_needed_button.pack(side=tk.LEFT, padx=10, pady=5)
+        self.submit_needed_button.grid(row=1, column=14, rowspan=2, sticky="w", padx=10)
 
     def on_schedule_double_click(self, event):
         """Handle double-clicking on any assigned employee to remove them from the schedule."""
@@ -565,16 +597,16 @@ class ScheduleWindow:
             # Create full path to the selected file
             excel_dir = os.path.join(os.getcwd(), "excel_sheets")
             file_path = os.path.join(excel_dir, selected_file)
-            
-            self.employees = load_employees_from_excel(file_path)  # Pass selected file to the function
-            if self.employees:  # Check if any employees were loaded
-                self.schedule.employees = self.employees  # Update the schedule's employee list
-                print(f"Loaded employees from {file_path}: {[emp.name for emp in self.employees]}.")  # Debug output
-                self.refresh_employee_selection_menu()
+
+            self.employees = load_employees_from_excel(file_path)  # Load employees from Excel
+            if self.employees:  # Ensure employees were loaded
+                self.schedule.employees = self.employees  # Update schedule's employee list
+                print(f"Loaded employees from {file_path}: {[emp.name for emp in self.employees]}")  # Debug
+
+                self.refresh_unassigned_employees()  # Update unassigned employees display
+                self.populate_employee_list()  # Update new alphabetical treeview
             else:
-                print(f"No employees loaded from {file_path}.")  # Debug if no employees are found
-            
-            self.refresh_unassigned_employees()  # Refresh the unassigned employees display
+                print(f"No employees loaded from {file_path}.")
 
     def add_employee_to_schedule(self, selected_days, employee_name):
         """Add an employee to the schedule for the selected days."""
@@ -711,6 +743,29 @@ class ScheduleWindow:
             tag = 'oddrow' if i % 2 == 0 else 'evenrow'
             self.finalized_tree.insert('', 'end', values=[i + 1] + row_values, tags=(tag,))
 
+    def populate_employee_list(self):
+        """Populate the alphabetical employee list treeview."""
+        if not hasattr(self, 'employee_list_tree'):
+            return  # Don't do anything if the tree hasn't been initialized
+
+        # Clear existing rows
+        for row in self.employee_list_tree.get_children():
+            self.employee_list_tree.delete(row)
+
+        # Sort employees alphabetically by name
+        sorted_employees = sorted(self.employees, key=lambda emp: emp.name)
+
+        for index, emp in enumerate(sorted_employees):
+            available_days = ', '.join(day for day in self.days if emp.availability.get(day, False))
+            
+            # Ensure notes is a string and not NaN
+            notes = emp.notes if hasattr(emp, 'notes') else ''
+            if notes is None or (isinstance(notes, float) and math.isnan(notes)):
+                notes = ''
+
+            tag = 'evenrow' if index % 2 == 0 else 'oddrow'
+            self.employee_list_tree.insert("", "end", values=(emp.name, available_days, notes), tags=(tag,))
+
     def submit_employees_needed(self):
         """Submit the employees needed for each day."""
         success_messages = []
@@ -755,7 +810,7 @@ class ScheduleWindow:
 
         top = tk.Toplevel(self.master)
         top.title("Manage Employees")
-        top.geometry("900x600")
+        top.geometry("1300x700")
 
         # allow resizing
         top.rowconfigure(1, weight=1)
@@ -774,20 +829,24 @@ class ScheduleWindow:
         tree_frame = tk.Frame(top)
         tree_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
         top.rowconfigure(0, weight=1)
-        tree_frame.columnconfigure(0, weight=1)
-        tree_frame.columnconfigure(1, weight=1)
+        top.columnconfigure(0, weight=1)
+        top.columnconfigure(1, weight=1)
 
         # Left frame for left tree and its scrollbar
         left_frame = tk.Frame(tree_frame)
         left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         tree_frame.rowconfigure(0, weight=1)
-        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)  # Increased weight for more expansion room
         left_frame.rowconfigure(0, weight=1)
         left_frame.columnconfigure(0, weight=1)
 
-        left_tree = ttk.Treeview(left_frame, columns=("Name", "Availability"), show="headings")
+        left_tree = ttk.Treeview(left_frame, columns=("Name", "Availability", "Notes"), show="headings")
         left_tree.heading("Name", text="Name")
+        left_tree.column("Name", width=200, anchor="w", stretch=True)
+        left_tree.heading("Notes", text="Notes")
+        left_tree.column("Notes", width=200, anchor="w", stretch=True)
         left_tree.heading("Availability", text="Available Days")
+        left_tree.column("Availability", width=200, anchor="w", stretch=True)
         left_tree.grid(row=0, column=0, sticky="nsew")
 
         left_scroll = ttk.Scrollbar(left_frame, orient="vertical", command=left_tree.yview)
@@ -797,38 +856,51 @@ class ScheduleWindow:
         # Right frame for right tree and its scrollbar
         right_frame = tk.Frame(tree_frame)
         right_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        tree_frame.columnconfigure(1, weight=1)
+        tree_frame.columnconfigure(1, weight=1)  # Right frame weight remains 1
         right_frame.rowconfigure(0, weight=1)
         right_frame.columnconfigure(0, weight=1)
 
-        right_tree = ttk.Treeview(right_frame, columns=("Name", "Availability"), show="headings")
+        right_tree = ttk.Treeview(right_frame, columns=("Name", "Availability", "Notes"), show="headings")
         right_tree.heading("Name", text="Name")
+        right_tree.column("Name", width=200, anchor="w", stretch=True)
         right_tree.heading("Availability", text="Available Days")
+        right_tree.column("Availability", width=200, anchor="w", stretch=True)
+        right_tree.heading("Notes", text="Notes")
+        right_tree.column("Notes", width=200, anchor="w", stretch=True)
         right_tree.grid(row=0, column=0, sticky="nsew")
 
         right_scroll = ttk.Scrollbar(right_frame, orient="vertical", command=right_tree.yview)
         right_tree.configure(yscrollcommand=right_scroll.set)
         right_scroll.grid(row=0, column=1, sticky="ns")
 
-        # Name entry (row 1)
+        # Frame to hold name + checkboxes (left) and notes (right)
         entry_frame = tk.Frame(top)
-        entry_frame.grid(row=1, column=0, columnspan=2, pady=5)
-        name_entry = tk.Entry(entry_frame, width=30)
-        name_entry.pack()
+        entry_frame.grid(row=1, column=0, columnspan=2, pady=5, padx=10, sticky="nsew")
+        entry_frame.columnconfigure(0, weight=1)
+        entry_frame.columnconfigure(1, weight=1)
         top.rowconfigure(1, weight=0)
         top.columnconfigure(0, weight=1)
         top.columnconfigure(1, weight=1)
 
-        # Checkboxes (row 2)
-        check_vars = {day: tk.BooleanVar() for day in self.days}
-        check_frame = tk.Frame(top)
-        check_frame.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10)
-        top.rowconfigure(2, weight=0)
+        # Name entry (left top)
+        name_label = tk.Label(entry_frame, text="Name:")
+        name_label.grid(row=0, column=0, sticky="w", padx=5)
+        name_entry = tk.Entry(entry_frame, width=30)
+        name_entry.grid(row=1, column=0, sticky="nw", padx=8)
 
-        inner_check_frame = tk.Frame(check_frame)
-        inner_check_frame.pack(anchor="center")
+        # Notes entry (right top)
+        notes_label = tk.Label(entry_frame, text="Notes:")
+        notes_label.grid(row=0, column=1, sticky="w", padx=(20, 0))
+        notes_entry = tk.Text(entry_frame, width=50, height=4, wrap="word")
+        notes_entry.grid(row=1, column=1, sticky="w", padx=(20, 0))
+        notes_entry.insert("1.0", "Enter notes here (optional)")
+
+        # Checkboxes (row below name, same left column)
+        check_vars = {day: tk.BooleanVar() for day in self.days}
+        check_frame = tk.Frame(entry_frame)
+        check_frame.grid(row=1, column=0, sticky="nw", pady=(25, 0))
         for day in self.days:
-            tk.Checkbutton(inner_check_frame, text=day, variable=check_vars[day]).pack(side=tk.LEFT, padx=5)
+            tk.Checkbutton(check_frame, text=day, variable=check_vars[day]).pack(side=tk.LEFT, padx=3)
 
         # Treeview row styling for odd rows
         style = ttk.Style()
@@ -844,29 +916,43 @@ class ScheduleWindow:
             all_employees = []
 
             for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
-                name = row[0]
-                available_days = [self.days[i] for i, val in enumerate(row[1:]) if val == "Yes"]
-                all_employees.append((name, ", ".join(available_days), idx))
+                name = row[0] if row[0] else ""
+                available_days = [self.days[i] for i, val in enumerate(row[1:8]) if val == "Yes"]
+
+                # Ensure notes are read from column 9 (index 8)
+                notes = ""
+                if len(row) > 8:
+                    raw_note = row[8]
+                    if isinstance(raw_note, str):
+                        notes = raw_note.strip()
+                    elif isinstance(raw_note, float) and not math.isnan(raw_note):
+                        notes = str(raw_note)  # convert number notes to string
+                    elif raw_note is not None:
+                        notes = str(raw_note)
+
+                all_employees.append((name, ", ".join(available_days), notes, idx))
 
             midpoint = len(all_employees) // 2
             left_employees[:] = all_employees[:midpoint]
             right_employees[:] = all_employees[midpoint:]
 
-            for i, (name, days, row_idx) in enumerate(left_employees):
+            for i, (name, days, notes, row_idx) in enumerate(left_employees):
                 tag = "oddrow" if i % 2 == 1 else ""
-                left_tree.insert("", "end", values=(name, days), tags=(tag,))
+                left_tree.insert("", "end", values=(name, days, notes), tags=(tag,))
                 employee_row_map[name] = row_idx
-            for i, (name, days, row_idx) in enumerate(right_employees):
+
+            for i, (name, days, notes, row_idx) in enumerate(right_employees):
                 tag = "oddrow" if i % 2 == 1 else ""
-                right_tree.insert("", "end", values=(name, days), tags=(tag,))
+                right_tree.insert("", "end", values=(name, days, notes), tags=(tag,))
                 employee_row_map[name] = row_idx
 
         def clear_selection():
             for tree in [left_tree, right_tree]:
-                tree.selection_remove(tree.selection())
+                tree.selection_remove(tree.selection())  # Deselect all
             name_entry.delete(0, tk.END)
             for var in check_vars.values():
                 var.set(False)
+            notes_entry.delete(1.0, tk.END)  # Clear notes as well
 
         def on_select(event, tree):
             selected = tree.selection()
@@ -878,8 +964,15 @@ class ScheduleWindow:
                 row = list(sheet.iter_rows(min_row=row_idx, max_row=row_idx, values_only=True))[0]
                 name_entry.delete(0, tk.END)
                 name_entry.insert(0, row[0])
+
+                # Set the availability checkboxes based on the row data
                 for i, day in enumerate(self.days):
                     check_vars[day].set(row[i + 1] == "Yes")
+
+                # Set the notes entry field with the appropriate value from the row
+                notes = row[8] if len(row) > 8 and row[8] is not None else ""  # Ensure notes are retrieved from the correct column
+                notes_entry.delete(1.0, tk.END)  # Clear any existing text
+                notes_entry.insert(tk.END, notes)  # Insert the notes into the Text widget
 
             # Clear selection in the other tree
             if tree == left_tree:
@@ -887,18 +980,16 @@ class ScheduleWindow:
             else:
                 left_tree.selection_remove(left_tree.selection())
 
-        left_tree.bind("<<TreeviewSelect>>", lambda e: on_select(e, left_tree))
-        right_tree.bind("<<TreeviewSelect>>", lambda e: on_select(e, right_tree))
-
         def add_employee():
             name = name_entry.get().strip()
+            notes = notes_entry.get("1.0", "end-1c").strip()
             if not name:
                 messagebox.showerror("Error", "Name cannot be empty.")
                 return
             if any(row[0].value == name for row in sheet.iter_rows(min_row=2)):
                 messagebox.showerror("Error", "Employee already exists.")
                 return
-            new_row = [name] + [("Yes" if check_vars[day].get() else "") for day in self.days]
+            new_row = [name] + [("Yes" if check_vars[day].get() else "") for day in self.days] + [notes]
             sheet.append(new_row)
             wb.save(file_path)
             load_employees()
@@ -908,7 +999,7 @@ class ScheduleWindow:
             selected = left_tree.selection() or right_tree.selection()
             if not selected:
                 return
-            tree = left_tree if selected in left_tree.selection() else right_tree
+            tree = left_tree if selected[0] in left_tree.selection() else right_tree
             name_to_delete = tree.item(selected[0])["values"][0]
 
             # Store deleted employee to the recently_deleted.xlsx file
@@ -989,18 +1080,25 @@ class ScheduleWindow:
             for i, day in enumerate(self.days):
                 value = "Yes" if check_vars[day].get() else ""
                 sheet.cell(row=row_idx, column=i + 2).value = value
+            notes = notes_entry.get("1.0", "end-1c").strip()
+            print("Employee row map:", employee_row_map)
+            sheet.cell(row=row_idx, column=9).value = notes
             wb.save(file_path)
             load_employees()
             clear_selection()
 
         def on_click_inside(event):
-            # Prevent selection clearing if inside the treeview
             widget = event.widget
-            if str(widget).startswith(str(left_tree)) or str(widget).startswith(str(right_tree)):
-                selected_item = widget.selection()
-                if selected_item:
-                    # Do nothing (keep the selection active)
-                    return
+            # Don't clear if clicking on Treeviews or form widgets
+            allowed_widgets = [left_tree, right_tree, name_entry, notes_entry]
+            allowed_widget_classes = (tk.Entry, tk.Text, tk.Checkbutton, tk.Button)
+
+            if any(str(widget).startswith(str(w)) for w in allowed_widgets) or isinstance(widget, allowed_widget_classes):
+                return  # Clicked inside an allowed widget — do nothing
+
+            # Otherwise, clear the selection
+            clear_selection()
+
 
         # Buttons
         btn_frame = tk.Frame(top)
@@ -1011,12 +1109,14 @@ class ScheduleWindow:
         tk.Button(btn_frame, text="Undo Delete", command=undo_delete).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Close", command=top.destroy).pack(side=tk.LEFT, padx=5)
 
-        # Load existing employees
-        load_employees()
+        left_tree.bind("<<TreeviewSelect>>", lambda e: on_select(e, left_tree))
+        right_tree.bind("<<TreeviewSelect>>", lambda e: on_select(e, right_tree))
 
         # Bind clicking outside to clear selection
         top.bind("<Button-1>", on_click_inside)
 
+        # Load existing employees
+        load_employees()
 if __name__ == "__main__":
     root = tk.Tk()
     app = ScheduleWindow(root)
