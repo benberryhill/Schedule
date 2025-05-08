@@ -1,0 +1,11 @@
+color code num on final based on days working (click on emp name to see on final)
+
+change emp list to master file persistant
+
+change color or use # to designate when not at max for the days
+
+double click on emp note to edit on master
+
+change emp needed to be for max of final
+
+drag and drop from temp to final (keep double click to delete)

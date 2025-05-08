@@ -304,6 +304,16 @@ class ScheduleWindow:
         self.master.title("Schedule Management")
         self.schedule_window = self
 
+        style = ttk.Style()
+        style.theme_use("classic")  # You can try 'alt', 'default', or 'vista' on Windows
+
+        # Customize default ttk.Frame background
+        style.configure("TFrame", background="#e6f2ff")
+
+        # Customize Treeview headings and rows
+        style.configure("Treeview.Heading", font=("Arial", 10, "bold"), background="#4682B4", foreground="white")
+        style.configure("Treeview", font=("Arial", 10), rowheight=22)
+
         self.days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
         self.employees = []
         self.schedule = Schedule(days=self.days, employees=[])
@@ -337,7 +347,7 @@ class ScheduleWindow:
         main_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
         for i in range(2): main_frame.columnconfigure(i, weight=1)
         main_frame.rowconfigure(0, weight=1)  # Schedule and Finalized Treeviews
-        main_frame.rowconfigure(1, weight=1)  # Unassigned and Employee Treeviews
+        main_frame.rowconfigure(1, weight=0)  # Unassigned and Employee Treeviews
         main_frame.rowconfigure(2, weight=0)  # Set Employees Needed stays small
 
         # Schedule Treeview
@@ -359,13 +369,13 @@ class ScheduleWindow:
         for day in self.days:
             self.schedule_tree.heading(day, text=day)
             self.schedule_tree.column(day, width=80, anchor="center", stretch=True)
-        self.schedule_tree.tag_configure('oddrow', background='#f0f0ff')
+        self.schedule_tree.tag_configure('oddrow', background='#AAC1DC')
         self.schedule_tree.tag_configure('evenrow', background='#ffffff')
         self.schedule_tree.bind("<Double-1>", self.on_schedule_double_click)
 
         # Unassigned Treeview
         unassigned_frame = ttk.Frame(main_frame)
-        unassigned_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        unassigned_frame.grid(row=1, column=0, sticky="sew", padx=5, pady=5)
 
         unassigned_scroll = tk.Scrollbar(unassigned_frame)
         unassigned_scroll.grid(row=0, column=1, sticky="ns")
@@ -375,14 +385,14 @@ class ScheduleWindow:
         unassigned_scroll.config(command=self.unassigned_tree.yview)
 
         unassigned_frame.columnconfigure(0, weight=1)
-        unassigned_frame.rowconfigure(0, weight=1)
+        unassigned_frame.rowconfigure(0, weight=0)
 
         self.unassigned_tree.heading("Row", text="#")
         self.unassigned_tree.column("Row", width=30, anchor="center", stretch=True)
         for day in self.days:
             self.unassigned_tree.heading(day, text=day)
             self.unassigned_tree.column(day, width=80, anchor="center", stretch=True)
-        self.unassigned_tree.tag_configure('oddrow', background='#f0f0ff')
+        self.unassigned_tree.tag_configure('oddrow', background='#AAC1DC')
         self.unassigned_tree.tag_configure('evenrow', background='#ffffff')
         self.unassigned_tree.bind("<Double-1>", self.on_unassigned_double_click)
 
@@ -405,7 +415,7 @@ class ScheduleWindow:
         for day in self.days:
             self.finalized_tree.heading(day, text=day)
             self.finalized_tree.column(day, width=80, anchor="center", stretch=True)
-        self.finalized_tree.tag_configure('oddrow', background='#f0f0ff')
+        self.finalized_tree.tag_configure('oddrow', background='#AAC1DC')
         self.finalized_tree.tag_configure('evenrow', background='#ffffff')
         self.finalized_tree.tag_configure('highlight', background='lightblue')
         self.finalized_tree.bind("<Double-1>", self.on_final_schedule_double_click)
@@ -413,7 +423,7 @@ class ScheduleWindow:
 
         # Employee List Treeview
         employee_list_frame = ttk.Frame(main_frame)
-        employee_list_frame.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
+        employee_list_frame.grid(row=1, column=1, sticky="sew", padx=5, pady=5)
 
         employee_scroll = tk.Scrollbar(employee_list_frame)
         employee_scroll.grid(row=0, column=1, sticky="ns")
@@ -423,7 +433,7 @@ class ScheduleWindow:
         employee_scroll.config(command=self.employee_list_tree.yview)
 
         employee_list_frame.columnconfigure(0, weight=1)
-        employee_list_frame.rowconfigure(0, weight=1)
+        employee_list_frame.rowconfigure(0, weight=0)
 
         self.employee_list_tree.heading("Name", text="Name")
         self.employee_list_tree.column("Name", width=200, anchor="w", stretch=True)
@@ -431,7 +441,7 @@ class ScheduleWindow:
         self.employee_list_tree.column("Availability", width=200, anchor="w", stretch=True)
         self.employee_list_tree.heading("Notes", text="Notes")
         self.employee_list_tree.column("Notes", width=200, anchor="w", stretch=True)
-        self.employee_list_tree.tag_configure('oddrow', background='#f0f0ff')
+        self.employee_list_tree.tag_configure('oddrow', background='#AAC1DC')
         self.employee_list_tree.tag_configure('evenrow', background='#ffffff')
 
         # Set Employees Needed Frame
@@ -906,8 +916,8 @@ class ScheduleWindow:
         style = ttk.Style()
         style.configure("Treeview", rowheight=25)
         style.map("Treeview", background=[("selected", "#347083")])
-        left_tree.tag_configure("oddrow", background="#f0f0ff")
-        right_tree.tag_configure("oddrow", background="#f0f0ff")
+        left_tree.tag_configure("oddrow", background="#AAC1DC")
+        right_tree.tag_configure("oddrow", background="#AAC1DC")
 
         def load_employees():
             left_tree.delete(*left_tree.get_children())
