@@ -9,35 +9,58 @@ from openpyxl import load_workbook, Workbook
 def load_employees_from_excel(file_path):
     """Load employees from an Excel file."""
     if not os.path.exists(file_path):
-        return []  # Return an empty list if the file does not exist
+        return []
 
-    # Load the Excel file
-    df = pd.read_excel(file_path)
+    try:
+        # Read Excel, explicitly tell pandas to keep empty strings as empty strings
+        # and convert typical NaN string values to empty strings.
+        df = pd.read_excel(file_path, keep_default_na=False, na_values=['NaN', 'nan', '', '#N/A', 'N/A'])
+    except Exception as e:
+        print(f"Error loading Excel file {file_path}: {e}")
+        messagebox.showerror("Excel Load Error", f"Could not load {os.path.basename(file_path)}.\nError: {e}")
+        return []
 
-    # Convert the DataFrame to a list of Employee objects
+
     employees = []
-    for _, row in df.iterrows():
-        name = row['Name']
-        if not isinstance(name, str):
-            print(f"Warning: Employee name is not a string. Converting '{name}' to string.")
-            name = str(name)  # Ensure name is a string
+    for index, row in df.iterrows(): # Added index for better error reporting
+        try:
+            name = row.get('Name', '') # Use .get with a default
+            if pd.isna(name) or not isinstance(name, str) or name.strip() == "":
+                # print(f"Warning: Skipping row {index+2} in {os.path.basename(file_path)} due to missing or invalid Name: '{name}'")
+                continue # Skip rows with no valid name
+            name = str(name).strip()
 
-        availability = {
-            'Sun': row.get('Sun') == "Yes",  # Convert "Yes" to True
-            'Mon': row.get('Mon') == "Yes",
-            'Tue': row.get('Tue') == "Yes",
-            'Wed': row.get('Wed') == "Yes",
-            'Thu': row.get('Thu') == "Yes",
-            'Fri': row.get('Fri') == "Yes",
-            'Sat': row.get('Sat') == "Yes"
-        }
 
-        notes = row.get('Notes', '')
-        print(f"Loaded Employee: {name}, Availability: {availability}, Notes: {notes}")  # Debug output
-        employees.append(Employee(name, availability, notes))
+            availability = {
+                'Sun': str(row.get('Sun', '')).strip().lower() == "yes",
+                'Mon': str(row.get('Mon', '')).strip().lower() == "yes",
+                'Tue': str(row.get('Tue', '')).strip().lower() == "yes",
+                'Wed': str(row.get('Wed', '')).strip().lower() == "yes",
+                'Thu': str(row.get('Thu', '')).strip().lower() == "yes",
+                'Fri': str(row.get('Fri', '')).strip().lower() == "yes",
+                'Sat': str(row.get('Sat', '')).strip().lower() == "yes"
+            }
+
+            notes_val = row.get('Notes', '') # Default to empty string if 'Notes' column is missing
+            
+            # Explicitly handle cases where notes might be NaN (float) or other non-string types
+            if pd.isna(notes_val): # Checks for pandas NaN, numpy.nan, None
+                notes = ""
+            elif isinstance(notes_val, float): # e.g. if a number was in notes somehow
+                notes = str(int(notes_val)) if notes_val.is_integer() else str(notes_val)
+            elif notes_val is None: # Handles explicit None
+                notes = ""
+            else:
+                notes = str(notes_val).strip() # Convert to string and strip whitespace
+
+            # The debug print can be noisy, consider commenting out for normal use
+            # print(f"Loaded Employee: {name}, Availability: {availability}, Notes: '{notes}'") 
+            employees.append(Employee(name, availability, notes))
+        except Exception as e:
+            print(f"Error processing row {index+2} in {os.path.basename(file_path)}: {row.to_dict()}. Error: {e}")
+            # Decide if you want to skip the row or raise the error
 
     return employees
-
 class Employee:
     def __init__(self, name, availability, notes=""):
         self.name = name
@@ -76,7 +99,7 @@ class Schedule:
             return
 
         # Only check the max employee limit if not forcing a manual assignment
-        if len(self.schedule[day]) < self.get_max_employees_for_day(day) or force:
+        if True:
             self.schedule[day].append(employee)
             self.schedule[day] = sorted(self.schedule[day], key=lambda emp: emp.name)
             print(f"Assigned {employee.name} to {day} and sorted alphabetically.")
@@ -85,11 +108,6 @@ class Schedule:
             if employee in self.unassigned_employees[day]:
                 self.unassigned_employees[day].remove(employee)
                 print(f"Removed {employee.name} from unassigned employees for {day}.")
-        else:
-            # This will now only affect auto-generated assignments
-            if not force:
-                self.unassigned_employees[day].append(employee)
-                print(f"Could not assign {employee.name} to {day}, max employees reached.")
 
     def generate_schedule(self):
         self.unassigned_employees = {day: [] for day in self.days}  # Reset unassigned employees
@@ -113,12 +131,8 @@ class Schedule:
             assigned_count = len(self.schedule[day])  # Start with already assigned count
             
             for employee in available_employees:
-                if assigned_count < needed:
-                    print(f"Trying to assign {employee.name} to {day}.")  # Debug output
-                    self.add_employee_to_day(day, employee)
-                    assigned_count += 1  # Increment assigned count
-                else:
-                    break  # Exit the loop if the required number has been met
+                print(f"Assigning {employee.name} to {day}.")  # Debug output
+                self.add_employee_to_day(day, employee)
 
             # Collect unassigned employees
             for employee in available_employees:
@@ -163,146 +177,16 @@ class Schedule:
             for day in self.days
         }
         print("Unassigned employees refreshed.")
-
-class EmployeesNeededWindow:
-    def __init__(self, master, schedule, app):
-        self.master = master
-        self.master.title("Set Employees Needed")
-        self.schedule = schedule
-        self.app = app  # Store the reference to the main App instance
-
-        self.entries = {}
-        for idx, day in enumerate(self.schedule.days):
-            tk.Label(master, text=f"{day}:").grid(row=idx, column=0, padx=10, pady=5)
-            entry = tk.Entry(master)
-            entry.grid(row=idx, column=1, padx=10, pady=5)
-            self.entries[day] = entry
-
-        self.submit_button = tk.Button(master, text="Submit", command=self.submit)
-        self.submit_button.grid(row=len(self.schedule.days), columnspan=2, pady=10)
-
-    def submit(self):
-        employees_needed = {}
-        for day, entry in self.entries.items():
-            try:
-                num_needed = int(entry.get())
-                employees_needed[day] = num_needed
-                entry.config(state='normal', disabledforeground='gray', bg='lightgray')
-            except ValueError:
-                messagebox.showerror("Invalid Input", f"Please enter a valid number for {day}.")
-                return
-
-        self.schedule.set_employees_needed(employees_needed)
-        messagebox.showinfo("Success", "Employees needed updated successfully!")
-        
-        # Generate the schedule based on the new employee needs
-        self.schedule.generate_schedule()  # Generate schedule after updating needs
-        
-        # Refresh the schedule preview in the main app
-        self.app.refresh_schedule_preview()  # Call the refresh method of the main App
-
-        self.master.destroy()  # Close the window after submission
-
-    def load_existing_data(self, employees_needed):
-        """Populate the entries if data is already set."""
-        for day, entry in self.entries.items():
-            if day in employees_needed:
-                entry.insert(0, employees_needed[day])
-                entry.config(state='normal', disabledforeground='gray', bg='lightgray')
-
-class ManualAssignmentWindow:
-    def __init__(self, master, app, days, employees):
-        self.app = app
-        self.master = master
-        self.days = days
-        self.employees = employees  # Pass the global employees list
-
-        tk.Label(master, text="Select Employee:").grid(row=0, column=0, padx=10, pady=5)
-        self.employee_var = tk.StringVar()
-        self.employee_dropdown = tk.OptionMenu(master, self.employee_var, *[emp.name for emp in employees], command=self.update_availability)
-        self.employee_dropdown.grid(row=0, column=1, padx=10, pady=5)
-
-        self.availability_label = tk.Label(master, text="Availability: ")
-        self.availability_label.grid(row=1, columnspan=7, padx=10, pady=5)
-
-        self.availability_vars = {}
-        for idx, day in enumerate(days):
-            self.availability_vars[day] = tk.BooleanVar()
-            checkbutton = tk.Checkbutton(master, text=day, variable=self.availability_vars[day])
-            checkbutton.grid(row=2, column=idx, padx=10, pady=5)
-
-        self.submit_button = tk.Button(master, text="Assign Employee", command=self.assign_employee)
-        self.submit_button.grid(row=3, columnspan=7, pady=10)
-
-    def update_availability(self, selected_employee_name):
-        """Update the availability label and checkboxes based on the selected employee."""
-        employee = next((emp for emp in self.employees if emp.name == selected_employee_name), None)
-        
-        if employee:
-            # Update the availability label to only show the available days
-            available_days = [day for day, available in employee.availability.items() if available]
-            availability_text = ", ".join(available_days) if available_days else "Not available"
-            self.availability_label.config(text=f"Availability: {availability_text}")
-
-            # Update the checkboxes for each day
-            for day in self.days:
-                self.availability_vars[day].set(employee.availability.get(day, False))
-
-    def assign_employee(self):
-        # Get all the selected days from the checkboxes
-        selected_days = [day for day, var in self.availability_vars.items() if var.get()]
-        employee_name = self.employee_var.get()
-
-        if selected_days and employee_name:
-            employee = next((emp for emp in self.employees if emp.name == employee_name), None)
-            
-            if employee:
-                for day in selected_days:
-                    is_available = employee.availability.get(day, False)
-                    current_assigned_count = len(self.app.schedule.schedule.get(day, []))
-
-                    # Use the method to get the max employees needed for the day
-                    max_employees_needed = self.app.schedule.get_max_employees_for_day(day)
-
-                    if is_available or current_assigned_count < max_employees_needed:
-                        # Confirm assignment if employee is available
-                        commit = messagebox.askyesno("Confirm Assignment", 
-                                                    f"{employee.name} is available on {day}. Do you want to assign them?")
-                        if commit:
-                            self.app.schedule.manually_add_employee(day, employee)  # Correct reference to schedule
-                            messagebox.showinfo("Success", f"{employee.name} assigned to {day}.")
-                        self.app.refresh_schedule_preview()  # Refresh schedule after assignment
-
-                    elif current_assigned_count >= max_employees_needed:
-                        # If the maximum has been reached, ask if they want to assign anyway
-                        force = messagebox.askyesno("Force Assignment", 
-                                                    f"Maximum employees for {day} reached. Do you want to assign {employee.name} anyway?")
-                        if force:
-                            self.app.schedule.manually_add_employee(day, employee, True)  # True for force assignment
-                            messagebox.showinfo("Success", f"{employee.name} assigned to {day} even though the max is reached.")
-                        self.app.refresh_schedule_preview()  # Refresh schedule after assignment
-
-                    else:
-                        # If the employee is not available
-                        force = messagebox.askyesno("Force Assignment", 
-                                                    f"{employee.name} is not available on {day}. Do you want to assign them anyway?")
-                        if force:
-                            self.app.schedule.manually_add_employee(day, employee, True)  # Force assignment
-                            messagebox.showinfo("Success", f"{employee.name} assigned to {day} even though they are unavailable.")
-                        self.app.refresh_schedule_preview()  # Refresh schedule after assignment
-
-                self.master.destroy()  # Close the window after all assignments
-
-            else:
-                messagebox.showerror("Error", "Employee not found.")
-        else:
-            messagebox.showerror("Error", "Please select both days and an employee.")
-
 class ScheduleWindow:
     def __init__(self, master):
+        # Master window
         self.master = master
         self.master.title("Schedule Management")
         self.schedule_window = self
+
+        self.drag_data = None
+        self.finalized_employees = []
+        self.all_possible_employees = []
 
         style = ttk.Style()
         style.theme_use("classic")  # You can try 'alt', 'default', or 'vista' on Windows
@@ -323,34 +207,42 @@ class ScheduleWindow:
 
         # Top frame for buttons
         top_frame = ttk.Frame(master)
-        top_frame.grid(row=0, column=0, columnspan=4, sticky="ew", padx=5, pady=5)
-        top_frame.columnconfigure(0, weight=1)
+        top_frame.grid(row=0, column=0, columnspan=5, sticky="ew", padx=5, pady=5)
+        top_frame.columnconfigure(0, weight=0)
+        top_frame.columnconfigure(1, weight=1)
 
-        # Dropdown
-        self.file_selection = ttk.Combobox(top_frame, values=self.get_excel_files(), state='readonly', width=48)
-        self.file_selection.set("Select Employee Excel Sheet")
-        self.file_selection.grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.file_selection.bind("<<ComboboxSelected>>", self.on_file_selected)
+        # Dropdown Set Schedule
+        self.set_schedule_dropdown_label = tk.Label(top_frame, text="Set Schedule List:", font=("Arial", 10, "bold"))
+        self.set_schedule_dropdown_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.file_selection_set = ttk.Combobox(top_frame, values=self.get_excel_files(), state='readonly', width=48)
+        self.file_selection_set.set("Select Set Employee Excel Sheet")
+        self.file_selection_set.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.file_selection_set.bind("<<ComboboxSelected>>", self.on_file_selected_set)
+
+        # Dropdown Unset Schedule
+        self.unset_schedule_dropdown_label = tk.Label(top_frame, text="Unset Schedule List:", font=("Arial", 10, "bold"))
+        self.unset_schedule_dropdown_label.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        self.file_selection_unset = ttk.Combobox(top_frame, values=self.get_excel_files(), state='readonly', width=48)
+        self.file_selection_unset.set("Select Unset Employee Excel Sheet")
+        self.file_selection_unset.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        self.file_selection_unset.bind("<<ComboboxSelected>>", self.on_file_selected_unset)
 
         # Buttons
-        self.generate_schedule_button = tk.Button(top_frame, text="Generate Schedule", command=self.generate_schedule)
-        self.generate_schedule_button.grid(row=0, column=1, padx=5, pady=5, sticky="w")
-
         self.push_to_final_button = tk.Button(top_frame, text="Push Changes To Final Schedule", command=self.push_changes_to_final_schedule)
-        self.push_to_final_button.grid(row=0, column=2, padx=5, pady=5)
+        self.push_to_final_button.grid(row=0, column=3, rowspan=2, padx=5, pady=5)
 
         self.employee_manager_button = tk.Button(top_frame, text="Manage Employees", command=self.open_manage_employees_window)
-        self.employee_manager_button.grid(row=0, column=3, padx=5, pady=5)
+        self.employee_manager_button.grid(row=0, column=4, rowspan=2, padx=5, pady=5)
 
         # Main frame
         main_frame = ttk.Frame(master)
         main_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
         for i in range(2): main_frame.columnconfigure(i, weight=1)
         main_frame.rowconfigure(0, weight=1)  # Schedule and Finalized Treeviews
-        main_frame.rowconfigure(1, weight=0)  # Unassigned and Employee Treeviews
+        main_frame.rowconfigure(1, weight=1)  # Unassigned and Employee Treeviews
         main_frame.rowconfigure(2, weight=0)  # Set Employees Needed stays small
 
-        # Schedule Treeview
+        '''# Schedule Treeview
         schedule_frame = ttk.Frame(main_frame)
         schedule_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
@@ -371,11 +263,11 @@ class ScheduleWindow:
             self.schedule_tree.column(day, width=80, anchor="center", stretch=True)
         self.schedule_tree.tag_configure('oddrow', background='#AAC1DC')
         self.schedule_tree.tag_configure('evenrow', background='#ffffff')
-        self.schedule_tree.bind("<Double-1>", self.on_schedule_double_click)
+        self.schedule_tree.bind("<Double-1>", self.on_schedule_double_click)'''
 
         # Unassigned Treeview
         unassigned_frame = ttk.Frame(main_frame)
-        unassigned_frame.grid(row=1, column=0, sticky="sew", padx=5, pady=5)
+        unassigned_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
         unassigned_scroll = tk.Scrollbar(unassigned_frame)
         unassigned_scroll.grid(row=0, column=1, sticky="ns")
@@ -385,7 +277,7 @@ class ScheduleWindow:
         unassigned_scroll.config(command=self.unassigned_tree.yview)
 
         unassigned_frame.columnconfigure(0, weight=1)
-        unassigned_frame.rowconfigure(0, weight=0)
+        unassigned_frame.rowconfigure(0, weight=1)
 
         self.unassigned_tree.heading("Row", text="#")
         self.unassigned_tree.column("Row", width=30, anchor="center", stretch=True)
@@ -396,9 +288,13 @@ class ScheduleWindow:
         self.unassigned_tree.tag_configure('evenrow', background='#ffffff')
         self.unassigned_tree.bind("<Double-1>", self.on_unassigned_double_click)
 
+        # Drag and drop bindings
+        self.unassigned_tree.bind("<ButtonPress-1>", self.on_drag_start_unassigned)
+        self.master.bind("<ButtonRelease-1>", self.on_drag_release_anywhere, add=True) # Global release
+
         # Finalized Treeview
         finalized_frame = ttk.Frame(main_frame)
-        finalized_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        finalized_frame.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=5, pady=5)
 
         finalized_scroll = tk.Scrollbar(finalized_frame)
         finalized_scroll.grid(row=0, column=1, sticky="ns")
@@ -423,7 +319,7 @@ class ScheduleWindow:
 
         # Employee List Treeview
         employee_list_frame = ttk.Frame(main_frame)
-        employee_list_frame.grid(row=1, column=1, sticky="sew", padx=5, pady=5)
+        employee_list_frame.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
 
         employee_scroll = tk.Scrollbar(employee_list_frame)
         employee_scroll.grid(row=0, column=1, sticky="ns")
@@ -433,7 +329,7 @@ class ScheduleWindow:
         employee_scroll.config(command=self.employee_list_tree.yview)
 
         employee_list_frame.columnconfigure(0, weight=1)
-        employee_list_frame.rowconfigure(0, weight=0)
+        employee_list_frame.rowconfigure(0, weight=1)
 
         self.employee_list_tree.heading("Name", text="Name")
         self.employee_list_tree.column("Name", width=200, anchor="w", stretch=True)
@@ -443,6 +339,8 @@ class ScheduleWindow:
         self.employee_list_tree.column("Notes", width=200, anchor="w", stretch=True)
         self.employee_list_tree.tag_configure('oddrow', background='#AAC1DC')
         self.employee_list_tree.tag_configure('evenrow', background='#ffffff')
+
+        self.employee_list_tree.bind("<ButtonPress-1>", self.on_drag_start_employee_list)
 
         # Set Employees Needed Frame
         set_employees_needed_frame = ttk.Frame(main_frame)
@@ -467,7 +365,15 @@ class ScheduleWindow:
         self.submit_needed_button = tk.Button(set_employees_needed_frame, text="Submit", command=self.submit_employees_needed)
         self.submit_needed_button.grid(row=1, column=14, rowspan=2, sticky="w", padx=10)
 
-    def on_schedule_double_click(self, event):
+        self.populate_employee_list()
+        if not self.employees: # If on_file_selected_unset hasn't run yet
+            self.employees = list(self.all_possible_employees) # Make a copy
+            self.schedule.employees = self.employees
+        self.refresh_employee_list_tree()
+        self.refresh_unassigned_employees() 
+        self.refresh_finalized_schedule()
+
+    '''def on_schedule_double_click(self, event):
         """Handle double-clicking on any assigned employee to remove them from the schedule."""
         # Get the row that was clicked
         item_id = self.schedule_tree.identify_row(event.y)
@@ -501,37 +407,220 @@ class ScheduleWindow:
             self.remove_employee_from_schedule(selected_day, selected_employee)
             messagebox.showinfo("Success", f"{selected_employee} was removed from {selected_day} and added back to unassigned employees.")
             self.refresh_schedule_preview()
-            self.refresh_unassigned_employees()
-        
-    def on_unassigned_double_click(self, event):
-        """Handle double-clicking on any unassigned employee to manually assign them."""
-        item_id = self.unassigned_tree.identify_row(event.y)
-        column_id = self.unassigned_tree.identify_column(event.x)  # Example: "#1" for the first column
+            self.refresh_unassigned_employees()'''
 
-        if not item_id or not column_id:
+    def on_drag_start_unassigned(self, event):
+        item_id = self.unassigned_tree.identify_row(event.y)
+        column_id_str = self.unassigned_tree.identify_column(event.x)
+
+        if not item_id or not column_id_str:
             return
 
-        column_index = int(column_id.replace('#', '')) - 1  # Convert column ID to index
-        if column_index == 0:
-            return  # Clicked on the row number column — ignore
-        
-        selected_day = self.days[column_index - 1]  # Get the correct day from the column including num row
+        column_index_tree = int(column_id_str.replace('#', ''))
+        if column_index_tree <= 1:
+            return
 
         item_values = self.unassigned_tree.item(item_id, 'values')
-        if not item_values or column_index >= len(item_values):
+        employee_name_index_in_item_values = column_index_tree - 1
+
+        if not item_values or employee_name_index_in_item_values >= len(item_values):
             return
 
-        selected_employee = item_values[column_index]
-        if not selected_employee:
+        employee_name = item_values[employee_name_index_in_item_values]
+        if not employee_name:
             return
 
-        confirm = messagebox.askyesno("Manual Assignment", f"Do you want to manually add {selected_employee} to {selected_day}?")
+        selected_employee = None
+        # The unassigned_tree displays names from self.employees filtered by final_schedule
+        for emp_obj in self.employees: # Search in the master list of ScheduleWindow
+            if emp_obj.name == employee_name:
+                selected_employee = emp_obj
+                break
+        
+        if selected_employee:
+            self.drag_data = {'employee': selected_employee, 'source_widget_type': 'unassigned_tree'}
+            self.master.config(cursor="hand2")
+        else:
+            print(f"Error: Employee object for '{employee_name}' (dragged from unassigned_tree) "
+                    f"not found in self.employees. Sync issue likely.")
 
-        if confirm:
-            self.add_employee_to_schedule([selected_day], selected_employee)
-            messagebox.showinfo("Success", f"{selected_employee} has been assigned to {selected_day}.")
-            self.refresh_schedule_preview()
-            self.refresh_unassigned_employees()
+    # In ScheduleWindow:
+
+    def on_drag_start_employee_list(self, event):
+        item_id = self.employee_list_tree.identify_row(event.y)
+        if not item_id:
+            return
+
+        item_values = self.employee_list_tree.item(item_id, 'values')
+        if not item_values or not item_values[0]: 
+            return
+
+        employee_name = item_values[0]
+        selected_employee_object = None
+        # Source from the static list
+        for emp in self.all_possible_employees: 
+            if emp.name == employee_name:
+                selected_employee_object = emp
+                break
+        
+        if selected_employee_object:
+            self.drag_data = {
+                'employee': selected_employee_object, # This is an Employee object from all_possible_employees
+                'source_widget_type': 'employee_list_tree'
+            }
+            self.master.config(cursor="hand2")
+        else:
+            print(f"Error: Could not find employee object for '{employee_name}' "
+                    f"from employee_list_tree in self.all_possible_employees.")
+
+    def on_drag_release_anywhere(self, event):
+        if not self.drag_data: 
+            return
+
+        employee_to_assign = self.drag_data.get('employee')
+        source_type = self.drag_data.get('source_widget_type') # 'unassigned_tree' or 'employee_list_tree'
+        
+        current_cursor = self.master.cget("cursor")
+        self.drag_data = None 
+        if current_cursor == "hand2": 
+            self.master.config(cursor="")
+
+        # ***** CORRECTED THIS CONDITION *****
+        if not employee_to_assign or source_type not in ['unassigned_tree', 'employee_list_tree']:
+            # print(f"Drag release: No valid employee or source type. Source: {source_type}")
+            return
+
+        x_root, y_root = event.x_root, event.y_root
+        target_widget = self.master.winfo_containing(x_root, y_root)
+
+        if target_widget == self.finalized_tree:
+            try:
+                tree_x = target_widget.winfo_pointerx() - target_widget.winfo_rootx()
+            except tk.TclError: 
+                return
+
+            target_column_id_str = self.finalized_tree.identify_column(tree_x)
+            if not target_column_id_str: return
+
+            target_column_index_tree = int(target_column_id_str.replace('#', '')) 
+            if target_column_index_tree <= 1: 
+                return
+            
+            day_list_index = target_column_index_tree - 2 
+            if 0 <= day_list_index < len(self.days):
+                target_day = self.days[day_list_index]
+                
+                if not employee_to_assign.availability.get(target_day, False):
+                    if not messagebox.askyesno("Not Available", 
+                                                f"{employee_to_assign.name} is not normally available on {target_day}. "
+                                                "Assign anyway?"):
+                        return 
+
+                self.assign_employee_to_final_schedule(employee_to_assign, target_day, method=f"drag from {source_type}")
+        # else:
+            # print(f"Drag released, but not on finalized_tree. Target: {target_widget}, Source: {source_type}")
+
+    # In ScheduleWindow:
+
+    def assign_employee_to_final_schedule(self, employee_dragged, day, method="unknown"):
+        if not isinstance(employee_dragged, Employee):
+            messagebox.showerror("Error", "Invalid employee data for assignment.")
+            return
+
+        # 1. Get the canonical Employee object from self.all_possible_employees.
+        # This ensures we're always working with the definitive version of the employee from the static list.
+        canonical_employee_object = None
+        for emp_in_static_list in self.all_possible_employees:
+            if emp_in_static_list.name == employee_dragged.name:
+                canonical_employee_object = emp_in_static_list
+                break
+        
+        if not canonical_employee_object:
+            messagebox.showerror("Error", f"Critical: Employee {employee_dragged.name} not found in the master directory (all_possible_employees).")
+            return
+        
+        # Use this canonical object for all further operations in this function.
+        employee_to_assign = canonical_employee_object
+
+        # 2. Check if this employee is in the current ACTIVE pool (self.employees).
+        # If not, add them. This is crucial for consistency, especially if they were
+        # dragged from employee_list_tree and weren't part of the loaded "Unset" list.
+        found_in_active_pool = False
+        for active_emp in self.employees:
+            if active_emp.name == employee_to_assign.name:
+                # If found, ensure we use the instance from the active pool for schedule.add_employee_to_day
+                # if that method relies on object identity from self.schedule.employees.
+                # However, since we're using canonical_employee_object, and we just added it if missing,
+                # this re-assignment might be redundant if add_employee_to_day only cares about name/availability.
+                # For safety, let's assume we should use the object that's now definitively in self.employees.
+                employee_to_assign_for_schedule_class = active_emp 
+                found_in_active_pool = True
+                break
+
+        if not found_in_active_pool:
+            self.employees.append(employee_to_assign) # Add the canonical object
+            self.schedule.employees = self.employees # Keep Schedule class's list in sync
+            employee_to_assign_for_schedule_class = employee_to_assign # It's now in self.employees
+            print(f"Added {employee_to_assign.name} to active pool (self.employees) as they were assigned from static list.")
+        
+        # 3. Add to staging schedule (self.schedule.schedule)
+        # Pass the object that is confirmed to be in (or just added to) self.employees
+        self.schedule.add_employee_to_day(day, employee_to_assign_for_schedule_class, force=True) 
+
+        # 4. Add to final schedule (self.schedule.final_schedule)
+        if day not in self.schedule.final_schedule: self.schedule.final_schedule[day] = []
+        
+        # Check against the final schedule using the canonical object.
+        is_already_in_final = any(final_emp.name == employee_to_assign.name for final_emp in self.schedule.final_schedule[day])
+
+        if not is_already_in_final:
+            self.schedule.final_schedule[day].append(employee_to_assign) # Add the canonical object
+            self.schedule.final_schedule[day] = sorted(
+                self.schedule.final_schedule[day],
+                key=lambda emp_obj: emp_obj.name.lower()
+            )
+        else:
+            messagebox.showinfo("Already Assigned", f"{employee_to_assign.name} is already in the final schedule for {day}.")
+        
+        # 5. Refresh UIs
+        self.refresh_unassigned_employees() 
+        self.refresh_finalized_schedule()
+
+    def on_unassigned_double_click(self, event):
+        item_id = self.unassigned_tree.identify_row(event.y)
+        column_id_str = self.unassigned_tree.identify_column(event.x)
+
+        if not item_id or not column_id_str: return
+
+        column_index_tree = int(column_id_str.replace('#', ''))
+        if column_index_tree <= 1: return 
+
+        day_list_index = column_index_tree - 2 
+        if not (0 <= day_list_index < len(self.days)): return
+        selected_day = self.days[day_list_index]
+        
+        item_values = self.unassigned_tree.item(item_id, 'values')
+        employee_name_index_in_item_values = column_index_tree -1
+
+        if not item_values or employee_name_index_in_item_values >= len(item_values): return
+
+        selected_employee_name = item_values[employee_name_index_in_item_values]
+        if not selected_employee_name: return
+        
+        selected_employee_object = next((emp for emp in self.employees if emp.name == selected_employee_name), None)
+        
+        if not selected_employee_object:
+            messagebox.showerror("Error", f"Employee '{selected_employee_name}' (from unassigned_tree) not found in master list.")
+            return
+
+        if not selected_employee_object.availability.get(selected_day, False):
+            if not messagebox.askyesno("Not Available", 
+                                        f"{selected_employee_object.name} is not normally available on {selected_day}. "
+                                        "Assign anyway?"):
+                return
+
+        if messagebox.askyesno("Manual Assignment", f"Do you want to manually add {selected_employee_object.name} to {selected_day}?"):
+            self.assign_employee_to_final_schedule(selected_employee_object, selected_day, method="double-click from unassigned")
 
     def on_final_schedule_double_click(self, event):
         """Handle double-clicking on any employee in the final schedule to remove them."""
@@ -565,109 +654,102 @@ class ScheduleWindow:
             self.refresh_finalized_schedule()
 
     def on_final_schedule_single_click(self, event):
-        """Highlight all cells in the final schedule for the selected employee, and remove highlight on unrelated clicks."""
-        # Identify clicked row and column
+        # Determine base tag for alternating colors before applying highlight
+        children = self.finalized_tree.get_children()
+        base_tags = {child_id: ('oddrow' if i % 2 == 0 else 'evenrow') for i, child_id in enumerate(children)}
+
+        for item_id in children:
+            self.finalized_tree.item(item_id, tags=(base_tags[item_id],)) # Reset to base tag
+
         item_id = self.finalized_tree.identify_row(event.y)
-        column = self.finalized_tree.identify_column(event.x)
+        column_str = self.finalized_tree.identify_column(event.x)
 
-        # Always clear previous highlights first
-        for item in self.finalized_tree.get_children():
-            self.finalized_tree.item(item, tags=())
+        if not item_id or column_str == '#0': return # Click on header or empty space
 
-        if not item_id or column == '#0':
-            return
+        column_index_tree = int(column_str.replace('#', '')) 
+        if column_index_tree <= 1: return # Click on row number column
 
-        column_index = int(column.replace('#', '')) - 1
         item_values = self.finalized_tree.item(item_id, 'values')
+        actual_data_column_index = column_index_tree - 1
 
-        if column_index == 0 or column_index >= len(item_values):
-            return
+        if actual_data_column_index >= len(item_values): return # Click beyond data columns
+        
+        selected_employee_name = item_values[actual_data_column_index]
+        if not selected_employee_name: return
 
-        selected_employee = item_values[column_index]
-        if not selected_employee:
-            return
-
-        # Apply highlight to all rows where this employee appears
-        for row_id in self.finalized_tree.get_children():
-            values = self.finalized_tree.item(row_id, 'values')
-            for name in values[1:]:  # skip index column
-                if name == selected_employee:
-                    self.finalized_tree.item(row_id, tags=('highlight',))
-                    break
+        for child_id in children:
+            current_values = self.finalized_tree.item(child_id, 'values')
+            # Check if employee name is in any day column for this row (values[1] onwards)
+            if any(name == selected_employee_name for name in current_values[1:]):
+                # Append 'highlight' to existing base tag
+                new_tags = (base_tags[child_id], 'highlight')
+                self.finalized_tree.item(child_id, tags=new_tags)
 
     def get_excel_files(self):
         """Retrieve all available Excel files for selection."""
         excel_dir = os.path.join(os.getcwd(), "excel_sheets")  # Assuming excel files are in an 'excel_sheets' folder
         return [f for f in os.listdir(excel_dir) if f.endswith('.xlsx')]
 
-    def on_file_selected(self, event):
-        """Load employees from the selected Excel file."""
-        selected_file = self.file_selection.get()
-        if selected_file and selected_file != "Select Employee Excel Sheet":
-            # Create full path to the selected file
+    def on_file_selected_set(self, event):
+        """Load employees from the selected Excel file and populate final schedule."""
+        selected_file = self.file_selection_set.get()
+        if selected_file and selected_file != "Select Set Employee Excel Sheet":
             excel_dir = os.path.join(os.getcwd(), "excel_sheets")
             file_path = os.path.join(excel_dir, selected_file)
 
-            self.employees = load_employees_from_excel(file_path)  # Load employees from Excel
-            if self.employees:  # Ensure employees were loaded
-                self.schedule.employees = self.employees  # Update schedule's employee list
-                print(f"Loaded employees from {file_path}: {[emp.name for emp in self.employees]}")  # Debug
+            self.set_employees = load_employees_from_excel(file_path)
+            if self.set_employees:
+                print(f"[SET] Loaded employees from {file_path}: {[emp.name for emp in self.set_employees]}")
+                self.schedule.final_schedule = {day: [] for day in self.days}
 
-                self.refresh_unassigned_employees()  # Update unassigned employees display
-                self.populate_employee_list()  # Update new alphabetical treeview
+                for emp in self.set_employees:
+                    for day in self.days:
+                        if emp.availability.get(day, False):
+                            self.schedule.final_schedule[day].append(emp)
+
+                self.refresh_finalized_schedule()
             else:
-                print(f"No employees loaded from {file_path}.")
+                print(f"[SET] No employees loaded from {file_path}.")
 
-    def add_employee_to_schedule(self, selected_days, employee_name):
-        """Add an employee to the schedule for the selected days."""
-        # Look up the actual employee object based on the employee name
-        employee = next((emp for emp in self.schedule.employees if emp.name == employee_name), None)
+    # In ScheduleWindow:
 
-        if not employee:
-            messagebox.showerror("Error", f"Employee '{employee_name}' not found.")
-            return  # Exit if the employee is not found
+    def on_file_selected_unset(self, event):
+        selected_file = self.file_selection_unset.get()
+        
+        if selected_file and selected_file != "Select Unset Employee Excel Sheet":
+            excel_dir = os.path.join(os.getcwd(), "excel_sheets")
+            file_path = os.path.join(excel_dir, selected_file)
 
-        for day in selected_days:
-            # Check if the day exists in the schedule
-            if day not in self.schedule.schedule:
-                messagebox.showerror("Error", f"{day} is not a valid day in the schedule.")
-                continue  # Skip this day if it is invalid
+            self.employees = load_employees_from_excel(file_path) # Update ACTIVE pool
+            self.schedule.employees = self.employees # Update Schedule object's active pool
+            
+            if self.employees:
+                print(f"[UNSET] Loaded {len(self.employees)} employees into ACTIVE pool (self.employees) from {file_path}")
+            else:
+                print(f"[UNSET] No employees loaded from {file_path}. ACTIVE pool (self.employees) is now empty.")
+        else:
+            # Fallback if "Select Unset..." is chosen or dropdown is cleared
+            # Option 1: Make active pool empty
+            # self.employees = []
+            # Option 2: Default to all_possible_employees
+            self.employees = list(self.all_possible_employees) # Make a copy
+            self.schedule.employees = self.employees
+            print("[UNSET] No specific file selected. ACTIVE pool (self.employees) defaulted to all possible employees.")
 
-            # Check if the employee is already assigned to this day
-            if employee not in self.schedule.schedule[day]:
-                self.schedule.schedule[day].append(employee)  # Add the employee object
+        self.schedule.schedule = {day: [] for day in self.days} # Clear staging schedule
 
-                # Sort employees alphabetically by name after adding
-                self.schedule.schedule[day] = sorted(self.schedule.schedule[day], key=lambda emp: emp.name.lower())
-
-                # Remove the employee from the unassigned list for the selected days
-                if employee in self.schedule.unassigned_employees[day]:
-                    self.schedule.unassigned_employees[day].remove(employee)
-
-        # Refresh the schedule preview after updating the schedule
-        self.refresh_schedule_preview()
-        self.refresh_unassigned_employees()
-
-    def remove_employee_from_schedule(self, day, employee_name):
-        """Remove an employee from the schedule and add them to the unassigned list."""
-        # Find the employee in the schedule for the selected day
-        employee = next((e for e in self.schedule.schedule[day] if e.name == employee_name), None)
-
-        if employee:
-            # Remove the employee from the schedule for that day
-            self.schedule.schedule[day] = [e for e in self.schedule.schedule[day] if e.name != employee_name]
-
-            # Add the employee back to the unassigned list for that day
-            self.schedule.unassigned_employees[day].append(employee) 
+        # self.populate_employee_list() # NO LONGER NEEDED HERE for the static tree
+        self.refresh_unassigned_employees() # Refreshes unassigned_tree based on new ACTIVE self.employees vs final_schedule
+        # self.refresh_finalized_schedule() # Generally not directly affected but good for consistency
 
     def push_changes_to_final_schedule(self):
         """Push assigned employees to final schedule without overwriting existing entries."""
         for day in self.days:
-            assigned_employees = self.schedule.schedule[day]
+            unassigned_employees = self.schedule.unassigned_employees[day]
             final_employees = self.schedule.final_schedule[day]
 
             # Only add new employees who are not already in the final list
-            for emp in assigned_employees:
+            for emp in unassigned_employees:
                 if emp not in final_employees:
                     final_employees.append(emp)
 
@@ -677,7 +759,7 @@ class ScheduleWindow:
         # Refresh the finalized schedule treeview
         self.refresh_finalized_schedule()
 
-    def refresh_schedule_preview(self):
+    '''def refresh_schedule_preview(self):
         """Refresh the schedule preview treeview with current assignments."""
         self.schedule_tree.delete(*self.schedule_tree.get_children())  # Clear existing rows
 
@@ -697,84 +779,82 @@ class ScheduleWindow:
             tag = 'oddrow' if i % 2 == 0 else 'evenrow'
             self.schedule_tree.insert('', 'end', values=[i + 1] + row_values, tags=(tag,)) #create each row with a num, names, and tags(colored lines)
 
-        self.refresh_unassigned_employees()
+        self.refresh_unassigned_employees()'''
 
+    # In ScheduleWindow:
     def refresh_unassigned_employees(self):
-        """Refresh the unassigned employees treeview with current unassigned employees."""
-        print("Refreshing unassigned employees...")  # Debug output
-        self.unassigned_tree.delete(*self.unassigned_tree.get_children())  # Clear existing rows
+        self.unassigned_tree.delete(*self.unassigned_tree.get_children())
 
-        # Prepare a list of rows for each day
-        row_values = []
-        for day in self.days:
-            # Get the list of unassigned employees for the day
-            unassigned_employees = self.schedule.unassigned_employees[day]
+        day_to_unassigned_objects = {} 
+        for day_key in self.days:
+            assigned_in_final_for_day_names = {emp.name for emp in self.schedule.final_schedule.get(day_key, [])}
+            
+            unassigned_for_this_day = []
+            # Iterate through the ACTIVE pool (self.employees)
+            for emp_candidate in self.employees: 
+                if emp_candidate.availability.get(day_key, False) and \
+                    emp_candidate.name not in assigned_in_final_for_day_names:
+                    unassigned_for_this_day.append(emp_candidate)
+            
+            day_to_unassigned_objects[day_key] = sorted(unassigned_for_this_day, key=lambda e: e.name.lower())
 
-            # Filter to show only available unassigned employees
-            available_unassigned_employees = [emp for emp in unassigned_employees if emp.availability.get(day, False)]
-
-            # Sort unassigned employees alphabetically by name
-            available_unassigned_employees.sort(key=lambda emp: emp.name.lower())
-
-            # Store employee names or leave it empty if no available unassigned employees
-            if available_unassigned_employees:
-                row_values.append([emp.name for emp in available_unassigned_employees])
-            else:
-                row_values.append([''])  # Leave empty if no available unassigned employees
-
-        # Insert the row values into the unassigned treeview
-        for i in range(max(len(values) for values in row_values) if row_values else 0):  # Check for non-empty row_values
-            row = []
-            for day in self.days:
-                day_index = self.days.index(day)
-                if i < len(row_values[day_index]):
-                    row.append(row_values[day_index][i])  # Add employee name if it exists
-                else:
-                    row.append('')  # Leave empty if no unassigned available employee
-            tag = 'oddrow' if i % 2 == 0 else 'evenrow'
-            self.unassigned_tree.insert('', 'end', values=[i + 1] + row, tags=(tag,)) #create each row with a num, names, and tags(colored lines)
-
-        print("Unassigned employees treeview refreshed.")  # Debug output
-
-    def refresh_finalized_schedule(self):
-        """Copy current assigned schedule to the finalized schedule treeview."""
-        self.finalized_tree.delete(*self.finalized_tree.get_children())  # Clear existing rows
-
-        max_employees = max(len(self.schedule.final_schedule[day]) for day in self.days)
-
-        for i in range(max_employees):
-            row_values = []
-            for day in self.days:
-                employees = sorted(self.schedule.final_schedule[day], key=lambda emp: emp.name.lower())
-                if i < len(employees):
-                    row_values.append(employees[i].name)
+        max_rows = max((len(emp_list) for emp_list in day_to_unassigned_objects.values()), default=0)
+        for i in range(max_rows):
+            row_values = [i + 1] 
+            for day_k in self.days:
+                if i < len(day_to_unassigned_objects[day_k]):
+                    row_values.append(day_to_unassigned_objects[day_k][i].name)
                 else:
                     row_values.append('')
             tag = 'oddrow' if i % 2 == 0 else 'evenrow'
-            self.finalized_tree.insert('', 'end', values=[i + 1] + row_values, tags=(tag,))
+            self.unassigned_tree.insert('', 'end', values=row_values, tags=(tag,))
+        # print("Unassigned employees treeview refreshed.")
+
+    def refresh_finalized_schedule(self):
+        """Display current finalized assignments per day (no max_employees logic)."""
+        self.finalized_tree.delete(*self.finalized_tree.get_children())
+        max_rows = max((len(self.schedule.final_schedule[day]) for day in self.days), default=0)
+
+        for i in range(max_rows):
+            row = []
+            for day in self.days:
+                employees = sorted(self.schedule.final_schedule[day], key=lambda emp: emp.name.lower())
+                if i < len(employees):
+                    row.append(employees[i].name)
+                else:
+                    row.append('')
+            tag = 'oddrow' if i % 2 == 0 else 'evenrow'
+            self.finalized_tree.insert('', 'end', values=[i + 1] + row, tags=(tag,))
 
     def populate_employee_list(self):
-        """Populate the alphabetical employee list treeview."""
-        if not hasattr(self, 'employee_list_tree'):
-            return  # Don't do anything if the tree hasn't been initialized
+        """Loads employees from "Employees_Full_List.xlsx" into self.all_possible_employees.
+        This list is static and primarily for the employee_list_tree."""
+        file_path = os.path.join(os.getcwd(), "excel_sheets", "Employees_Full_List.xlsx")
+        if not os.path.exists(file_path):
+            print("Default 'Employees_Full_List.xlsx' not found.")
+            self.all_possible_employees = []
+            return
 
-        # Clear existing rows
+        self.all_possible_employees = load_employees_from_excel(file_path)
+        print(f"Loaded {len(self.all_possible_employees)} employees into self.all_possible_employees (static list).")
+
+    def refresh_employee_list_tree(self):
+        """
+        Populates the employee_list_tree (bottom right) from self.all_possible_employees.
+        """
+        if not hasattr(self, 'employee_list_tree'): return
         for row in self.employee_list_tree.get_children():
             self.employee_list_tree.delete(row)
+        
+        # Display whatever is currently in self.all_possible_employees, sorted
+        sorted_static_employees = sorted(self.all_possible_employees, key=lambda emp: emp.name.lower())
 
-        # Sort employees alphabetically by name
-        sorted_employees = sorted(self.employees, key=lambda emp: emp.name)
-
-        for index, emp in enumerate(sorted_employees):
-            available_days = ', '.join(day for day in self.days if emp.availability.get(day, False))
-            
-            # Ensure notes is a string and not NaN
-            notes = emp.notes if hasattr(emp, 'notes') else ''
-            if notes is None or (isinstance(notes, float) and math.isnan(notes)):
-                notes = ''
-
-            tag = 'evenrow' if index % 2 == 0 else 'oddrow'
-            self.employee_list_tree.insert("", "end", values=(emp.name, available_days, notes), tags=(tag,))
+        for index, emp in enumerate(sorted_static_employees):
+            available_days_str = ', '.join(day for day in self.days if emp.availability.get(day, False))
+            notes_str = emp.notes or ""
+            tag = 'oddrow' if index % 2 == 0 else 'evenrow'
+            self.employee_list_tree.insert("", "end", values=(emp.name, available_days_str, notes_str), tags=(tag,))
+        # print(f"Employee list tree (static) refreshed with {len(sorted_static_employees)} employees.")
 
     def submit_employees_needed(self):
         """Submit the employees needed for each day."""
@@ -799,24 +879,37 @@ class ScheduleWindow:
             error_message = "\n".join(error_messages)
             messagebox.showerror("Error", error_message)
 
-    def generate_schedule(self):
-        """Generate the schedule based on current parameters."""
-        self.schedule.generate_schedule()
-        self.refresh_schedule_preview()
-
     def open_manage_employees_window(self):
-        selected_file = self.file_selection.get()
-        if selected_file == "Select Employee Excel Sheet":
-            messagebox.showerror("Error", "Please select an Excel file first.")
-            return
+        excel_dir = os.path.join(os.getcwd(), "excel_sheets")
+        file_to_manage_name = "Employees_Full_List.xlsx"
+        print(f"Manage Employees window will operate on: {file_to_manage_name}") # For debugging
 
-        file_path = os.path.join(os.getcwd(), "excel_sheets", selected_file)
-        deleted_file_path = os.path.join(os.getcwd(), "excel_sheets", "recently_deleted.xlsx")
+        file_path = os.path.join(excel_dir, file_to_manage_name)
+        if not os.path.exists(file_path):
+            if messagebox.askyesno("File Not Found", f"The master employee file '{file_to_manage_name}' was not found.\n"
+                                    "Would you like to create it with default headers?"):
+                wb_new = Workbook()
+                header = ["Name"] + self.days + ["Notes"]
+                try:
+                    wb_new.active.append(header)
+                    wb_new.save(file_path)
+                    print(f"Created '{file_path}'")
+                except Exception as e:
+                    messagebox.showerror("File Creation Error", f"Could not create '{file_path}'.\nError: {e}")
+                    return
+            else:
+                return # User chose not to create the file
 
-        # Create a workbook for recently_deleted.xlsx if it doesn't exist
+        deleted_file_path = os.path.join(excel_dir, "recently_deleted.xlsx")
         if not os.path.exists(deleted_file_path):
-            wb = Workbook()
-            wb.save(deleted_file_path)
+            wb_del = Workbook()
+            header_del = ["Name"] + self.days + ["Notes"] # Match header for consistency
+            try:
+                wb_del.active.append(header_del)
+                wb_del.save(deleted_file_path)
+            except Exception as e:
+                print(f"Could not create recently_deleted.xlsx: {e}")
+                # Non-critical, so we can continue
 
         top = tk.Toplevel(self.master)
         top.title("Manage Employees")
@@ -1108,7 +1201,6 @@ class ScheduleWindow:
 
             # Otherwise, clear the selection
             clear_selection()
-
 
         # Buttons
         btn_frame = tk.Frame(top)
