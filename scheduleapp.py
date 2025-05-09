@@ -3,8 +3,30 @@ import math
 import os
 import tkinter as tk
 from tkinter import ttk
-from tkinter import messagebox, scrolledtext
+from tkinter import messagebox
 from openpyxl import load_workbook, Workbook
+
+root = tk.Tk()
+root.withdraw()
+script_dir = os.path.dirname(os.path.abspath(__file__))
+theme_path = os.path.join(script_dir, "themes", "azure.tcl")
+
+try:
+    root.tk.call("source", theme_path)
+    print("Azure.tcl sourced successfully.")
+except tk.TclError as e:
+    print(f"Warning: Could not source Azure theme from {theme_path}: {e}")
+style = ttk.Style(root)
+try:
+    style.theme_use("azure-light") 
+    print("Azure theme 'azure-light' applied via ttk.Style().theme_use().")
+except tk.TclError as e:
+    print(f"Failed to apply 'azure-light' theme: {e}. Trying fallback or default.")
+    try:
+        style.theme_use("clam")
+        print("Fell back to 'clam' theme.")
+    except tk.TclError:
+        print("Could not apply any specific ttk theme. Using system default.")
 
 def load_employees_from_excel(file_path):
     """Load employees from an Excel file."""
@@ -12,8 +34,6 @@ def load_employees_from_excel(file_path):
         return []
 
     try:
-        # Read Excel, explicitly tell pandas to keep empty strings as empty strings
-        # and convert typical NaN string values to empty strings.
         df = pd.read_excel(file_path, keep_default_na=False, na_values=['NaN', 'nan', '', '#N/A', 'N/A'])
     except Exception as e:
         print(f"Error loading Excel file {file_path}: {e}")
@@ -181,38 +201,34 @@ class ScheduleWindow:
     def __init__(self, master):
         # Master window
         self.master = master
+        self.master.deiconify()
         self.master.title("Schedule Management")
-        self.schedule_window = self
+        self.master.rowconfigure(0, weight=1)
+        self.master.columnconfigure(0, weight=1)
+
+        self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+        self.app_container = ttk.Frame(self.master, padding="0") # Use ttk.Frame
+        self.app_container.grid(row=0, column=0, sticky="nsew")
+        self.app_container.columnconfigure(0, weight=1)
+        self.app_container.rowconfigure(0, weight=0)
+        self.app_container.rowconfigure(1, weight=1)
 
         self.drag_data = None
         self.finalized_employees = []
         self.all_possible_employees = []
-
-        style = ttk.Style()
-        style.theme_use("classic")  # You can try 'alt', 'default', or 'vista' on Windows
-
-        # Customize default ttk.Frame background
-        style.configure("TFrame", background="#e6f2ff")
-
-        # Customize Treeview headings and rows
-        style.configure("Treeview.Heading", font=("Arial", 10, "bold"), background="#4682B4", foreground="white")
-        style.configure("Treeview", font=("Arial", 10), rowheight=22)
-
         self.days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
         self.employees = []
         self.schedule = Schedule(days=self.days, employees=[])
 
-        self.master.columnconfigure(0, weight=1)
-        self.master.rowconfigure(1, weight=1)
-
         # Top frame for buttons
-        top_frame = ttk.Frame(master)
+        top_frame = ttk.Frame(self.app_container)
         top_frame.grid(row=0, column=0, columnspan=5, sticky="ew", padx=5, pady=5)
         top_frame.columnconfigure(0, weight=0)
         top_frame.columnconfigure(1, weight=1)
 
         # Dropdown Set Schedule
-        self.set_schedule_dropdown_label = tk.Label(top_frame, text="Set Schedule List:", font=("Arial", 10, "bold"))
+        self.set_schedule_dropdown_label = ttk.Label(top_frame, text="Set Schedule List:", font=("Arial", 10, "bold"))
         self.set_schedule_dropdown_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.file_selection_set = ttk.Combobox(top_frame, values=self.get_excel_files(), state='readonly', width=48)
         self.file_selection_set.set("Select Set Employee Excel Sheet")
@@ -220,7 +236,7 @@ class ScheduleWindow:
         self.file_selection_set.bind("<<ComboboxSelected>>", self.on_file_selected_set)
 
         # Dropdown Unset Schedule
-        self.unset_schedule_dropdown_label = tk.Label(top_frame, text="Unset Schedule List:", font=("Arial", 10, "bold"))
+        self.unset_schedule_dropdown_label = ttk.Label(top_frame, text="Unset Schedule List:", font=("Arial", 10, "bold"))
         self.unset_schedule_dropdown_label.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         self.file_selection_unset = ttk.Combobox(top_frame, values=self.get_excel_files(), state='readonly', width=48)
         self.file_selection_unset.set("Select Unset Employee Excel Sheet")
@@ -228,48 +244,28 @@ class ScheduleWindow:
         self.file_selection_unset.bind("<<ComboboxSelected>>", self.on_file_selected_unset)
 
         # Buttons
-        self.push_to_final_button = tk.Button(top_frame, text="Push Changes To Final Schedule", command=self.push_changes_to_final_schedule)
+        self.push_to_final_button = ttk.Button(top_frame, text="Push Changes To Final Schedule", command=self.push_changes_to_final_schedule)
         self.push_to_final_button.grid(row=0, column=3, rowspan=2, padx=5, pady=5)
 
-        self.employee_manager_button = tk.Button(top_frame, text="Manage Employees", command=self.open_manage_employees_window)
+        self.employee_manager_button = ttk.Button(top_frame, text="Manage Employees", command=self.open_manage_employees_window)
         self.employee_manager_button.grid(row=0, column=4, rowspan=2, padx=5, pady=5)
 
+        toggle_btn = ttk.Button(top_frame, text="Toggle Theme", command=self.toggle_theme)
+        toggle_btn.grid(row=0, column=5, rowspan=2, padx=5, pady=5)
+
         # Main frame
-        main_frame = ttk.Frame(master)
-        main_frame.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        main_frame = ttk.Frame(self.app_container)
+        main_frame.grid(row=1, column=0, sticky="nsew")
         for i in range(2): main_frame.columnconfigure(i, weight=1)
         main_frame.rowconfigure(0, weight=1)  # Schedule and Finalized Treeviews
         main_frame.rowconfigure(1, weight=1)  # Unassigned and Employee Treeviews
         main_frame.rowconfigure(2, weight=0)  # Set Employees Needed stays small
 
-        '''# Schedule Treeview
-        schedule_frame = ttk.Frame(main_frame)
-        schedule_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-
-        schedule_scroll = tk.Scrollbar(schedule_frame)
-        schedule_scroll.grid(row=0, column=1, sticky="ns")
-
-        self.schedule_tree = ttk.Treeview(schedule_frame, columns=["Row"] + self.days, show="headings", height=15, yscrollcommand=schedule_scroll.set)
-        self.schedule_tree.grid(row=0, column=0, sticky="nsew")
-        schedule_scroll.config(command=self.schedule_tree.yview)
-
-        schedule_frame.columnconfigure(0, weight=1)
-        schedule_frame.rowconfigure(0, weight=1)
-
-        self.schedule_tree.heading("Row", text="#")
-        self.schedule_tree.column("Row", width=30, anchor="center", stretch=True)
-        for day in self.days:
-            self.schedule_tree.heading(day, text=day)
-            self.schedule_tree.column(day, width=80, anchor="center", stretch=True)
-        self.schedule_tree.tag_configure('oddrow', background='#AAC1DC')
-        self.schedule_tree.tag_configure('evenrow', background='#ffffff')
-        self.schedule_tree.bind("<Double-1>", self.on_schedule_double_click)'''
-
         # Unassigned Treeview
         unassigned_frame = ttk.Frame(main_frame)
         unassigned_frame.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
 
-        unassigned_scroll = tk.Scrollbar(unassigned_frame)
+        unassigned_scroll = ttk.Scrollbar(unassigned_frame)
         unassigned_scroll.grid(row=0, column=1, sticky="ns")
 
         self.unassigned_tree = ttk.Treeview(unassigned_frame, columns=["Row"] + self.days, show="headings", height=15, yscrollcommand=unassigned_scroll.set)
@@ -296,7 +292,7 @@ class ScheduleWindow:
         finalized_frame = ttk.Frame(main_frame)
         finalized_frame.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=5, pady=5)
 
-        finalized_scroll = tk.Scrollbar(finalized_frame)
+        finalized_scroll = ttk.Scrollbar(finalized_frame)
         finalized_scroll.grid(row=0, column=1, sticky="ns")
 
         self.finalized_tree = ttk.Treeview(finalized_frame, columns=["Row"] + self.days, show="headings", height=15, yscrollcommand=finalized_scroll.set)
@@ -321,7 +317,7 @@ class ScheduleWindow:
         employee_list_frame = ttk.Frame(main_frame)
         employee_list_frame.grid(row=1, column=1, sticky="nsew", padx=5, pady=5)
 
-        employee_scroll = tk.Scrollbar(employee_list_frame)
+        employee_scroll = ttk.Scrollbar(employee_list_frame)
         employee_scroll.grid(row=0, column=1, sticky="ns")
 
         self.employee_list_tree = ttk.Treeview(employee_list_frame, columns=["Name", "Availability", "Notes"], show="headings", height=15, yscrollcommand=employee_scroll.set)
@@ -347,23 +343,47 @@ class ScheduleWindow:
         set_employees_needed_frame.grid(row=2, column=0, sticky="ew", padx=5, pady=5)
 
         # Set Employees Needed Label
-        set_employees_needed_label = tk.Label(set_employees_needed_frame, text="Set Employees Needed", font=("Arial", 12, "bold"))
-        set_employees_needed_label.grid(row=0, column=0, columnspan=14, sticky="w", pady=(0, 5))
+        set_employees_needed_label = ttk.Label(set_employees_needed_frame, text="Set Employees Needed", font=("Arial", 12, "bold"))
+        set_employees_needed_label.grid(row=0, column=0, columnspan=15, rowspan=2, sticky="w", pady=(0, 35))
 
         # Entries for Each Day (placed in two rows if needed)
         self.employees_needed_entries = {}
         for idx, day in enumerate(self.days):
             col = idx % 7
             row = 1 if idx < 7 else 2
-            label = tk.Label(set_employees_needed_frame, text=f"{day}:")
-            label.grid(row=row, column=col*2, sticky="w", padx=(0, 2), pady=2)
-            entry = tk.Entry(set_employees_needed_frame, width=5)
-            entry.grid(row=row, column=col*2 + 1, sticky="w", padx=(0, 5), pady=2)
+            label = ttk.Label(set_employees_needed_frame, text=f"{day}:")
+            label.grid(row=row, column=col*2, sticky="w", padx=(0, 2), pady=5)
+            entry = ttk.Entry(set_employees_needed_frame, width=5)
+            entry.grid(row=row, column=col*2 + 1, sticky="w", padx=(0, 5), pady=5)
             self.employees_needed_entries[day] = entry
 
         # Submit Button aligned under the entry fields
-        self.submit_needed_button = tk.Button(set_employees_needed_frame, text="Submit", command=self.submit_employees_needed)
+        self.submit_needed_button = ttk.Button(set_employees_needed_frame, text="Submit", command=self.submit_employees_needed)
         self.submit_needed_button.grid(row=1, column=14, rowspan=2, sticky="w", padx=10)
+
+        # Employee info frame
+        employee_info_frame = ttk.Frame(main_frame)
+        employee_info_frame.grid(row=2, column=1, sticky="w", padx=5, pady=5)
+
+        # Name entry (left top)
+        name_label = ttk.Label(employee_info_frame, text="Name:", font=("Arial", 12))
+        name_label.grid(row=0, column=0, sticky="sw", padx=5, pady=(40, 0))
+        name_entry = ttk.Entry(employee_info_frame, width=30)
+        name_entry.grid(row=0, column=1, sticky="sw", padx=5, pady=(40, 0))
+
+        # Checkboxes (same row below name, iterate to the right)
+        check_vars = {day: tk.BooleanVar() for day in self.days}
+        check_frame = ttk.Frame(employee_info_frame)
+        check_frame.grid(row=1, column=0, columnspan=2, sticky="sw", padx=5, pady=(0, 40))
+        for i, day in enumerate(self.days):
+            tk.Checkbutton(check_frame, text=day, variable=check_vars[day]).grid(row=0, column=i, sticky="w", padx=2)
+
+        # Notes entry (right)
+        notes_label = ttk.Label(employee_info_frame, text="Notes:", font=("Arial", 12))
+        notes_label.grid(row=0, column=2, sticky="ew", padx=(20, 40), pady=0)
+        notes_entry = tk.Text(employee_info_frame, width=50, height=4, wrap="word")
+        notes_entry.grid(row=1, column=2, sticky="ew", padx=(20, 40), pady=(0,25))
+        notes_entry.insert("1.0", "Edit note here")
 
         self.populate_employee_list()
         if not self.employees: # If on_file_selected_unset hasn't run yet
@@ -373,41 +393,27 @@ class ScheduleWindow:
         self.refresh_unassigned_employees() 
         self.refresh_finalized_schedule()
 
-    '''def on_schedule_double_click(self, event):
-        """Handle double-clicking on any assigned employee to remove them from the schedule."""
-        # Get the row that was clicked
-        item_id = self.schedule_tree.identify_row(event.y)
-        if not item_id:
-            return  # No row selected
+    def on_closing(self):
+        if messagebox.askokcancel("Quit", "Do you want to quit?"):
+            self.master.destroy()
 
-        # Get the column that was clicked
-        column = self.schedule_tree.identify_column(event.x)
-        column_index = int(column.replace('#', '')) - 1  # Columns are 1-based, so subtract 1
+    def toggle_theme(self):
+        # This now uses the Tcl proc 'set_theme' defined in azure.tcl
+        try:
+            s = ttk.Style()
+            current_ttk_theme = s.theme_use()
+            
+            print(f"Current Ttk theme for toggle: {current_ttk_theme}")
 
-        # Get the values for the selected row
-        item_values = self.schedule_tree.item(item_id, 'values')
-
-        if column_index == 0:
-            return  # Clicked on the row number column — ignore
-
-        # Get the employee name from the clicked column
-        selected_employee = item_values[column_index]
-
-        # If no employee found in the clicked cell, exit
-        if not selected_employee:
-            return
-
-        # Determine the day based on the clicked column index
-        selected_day = self.days[column_index - 1]
-
-        # Prompt user to confirm removal
-        confirm = messagebox.askyesno("Remove Employee", f"Do you want to remove {selected_employee} from {selected_day}?")
-
-        if confirm:
-            self.remove_employee_from_schedule(selected_day, selected_employee)
-            messagebox.showinfo("Success", f"{selected_employee} was removed from {selected_day} and added back to unassigned employees.")
-            self.refresh_schedule_preview()
-            self.refresh_unassigned_employees()'''
+            if "dark" in current_ttk_theme.lower():
+                self.master.tk.call("set_theme", "light")
+                print("Called Tcl proc: set_theme light")
+            else:
+                self.master.tk.call("set_theme", "dark")
+                print("Called Tcl proc: set_theme dark")
+        except tk.TclError as e:
+            messagebox.showerror("Theme Error", f"Could not switch theme via Tcl 'set_theme'.\nError: {e}")
+            print(f"Error toggling theme via Tcl: {e}")
 
     def on_drag_start_unassigned(self, event):
         item_id = self.unassigned_tree.identify_row(event.y)
@@ -443,8 +449,6 @@ class ScheduleWindow:
         else:
             print(f"Error: Employee object for '{employee_name}' (dragged from unassigned_tree) "
                     f"not found in self.employees. Sync issue likely.")
-
-    # In ScheduleWindow:
 
     def on_drag_start_employee_list(self, event):
         item_id = self.employee_list_tree.identify_row(event.y)
@@ -485,7 +489,6 @@ class ScheduleWindow:
         if current_cursor == "hand2": 
             self.master.config(cursor="")
 
-        # ***** CORRECTED THIS CONDITION *****
         if not employee_to_assign or source_type not in ['unassigned_tree', 'employee_list_tree']:
             # print(f"Drag release: No valid employee or source type. Source: {source_type}")
             return
@@ -519,8 +522,6 @@ class ScheduleWindow:
                 self.assign_employee_to_final_schedule(employee_to_assign, target_day, method=f"drag from {source_type}")
         # else:
             # print(f"Drag released, but not on finalized_tree. Target: {target_widget}, Source: {source_type}")
-
-    # In ScheduleWindow:
 
     def assign_employee_to_final_schedule(self, employee_dragged, day, method="unknown"):
         if not isinstance(employee_dragged, Employee):
@@ -711,8 +712,6 @@ class ScheduleWindow:
             else:
                 print(f"[SET] No employees loaded from {file_path}.")
 
-    # In ScheduleWindow:
-
     def on_file_selected_unset(self, event):
         selected_file = self.file_selection_unset.get()
         
@@ -759,29 +758,6 @@ class ScheduleWindow:
         # Refresh the finalized schedule treeview
         self.refresh_finalized_schedule()
 
-    '''def refresh_schedule_preview(self):
-        """Refresh the schedule preview treeview with current assignments."""
-        self.schedule_tree.delete(*self.schedule_tree.get_children())  # Clear existing rows
-
-        max_employees = max(len(self.schedule.schedule[day]) for day in self.days)  # Find the maximum number of employees assigned to a single day
-
-        # Add rows for the maximum number of assigned employees
-        for i in range(max_employees):
-            row_values = []
-            for day in self.days:
-                employees = self.schedule.schedule[day]
-                if i < len(employees):
-                    row_values.append(employees[i].name)  # Add employee name if it exists
-                else:
-                    row_values.append('')  # Leave empty if no employee is assigned
-
-            # Insert the row into the schedule treeview
-            tag = 'oddrow' if i % 2 == 0 else 'evenrow'
-            self.schedule_tree.insert('', 'end', values=[i + 1] + row_values, tags=(tag,)) #create each row with a num, names, and tags(colored lines)
-
-        self.refresh_unassigned_employees()'''
-
-    # In ScheduleWindow:
     def refresh_unassigned_employees(self):
         self.unassigned_tree.delete(*self.unassigned_tree.get_children())
 
@@ -991,19 +967,19 @@ class ScheduleWindow:
         name_entry = tk.Entry(entry_frame, width=30)
         name_entry.grid(row=1, column=0, sticky="nw", padx=8)
 
-        # Notes entry (right top)
-        notes_label = tk.Label(entry_frame, text="Notes:")
-        notes_label.grid(row=0, column=1, sticky="w", padx=(20, 0))
-        notes_entry = tk.Text(entry_frame, width=50, height=4, wrap="word")
-        notes_entry.grid(row=1, column=1, sticky="w", padx=(20, 0))
-        notes_entry.insert("1.0", "Enter notes here (optional)")
-
         # Checkboxes (row below name, same left column)
         check_vars = {day: tk.BooleanVar() for day in self.days}
         check_frame = tk.Frame(entry_frame)
         check_frame.grid(row=1, column=0, sticky="nw", pady=(25, 0))
         for day in self.days:
             tk.Checkbutton(check_frame, text=day, variable=check_vars[day]).pack(side=tk.LEFT, padx=3)
+
+        # Notes entry (right top)
+        notes_label = tk.Label(entry_frame, text="Notes:")
+        notes_label.grid(row=0, column=1, sticky="w", padx=(20, 0))
+        notes_entry = tk.Text(entry_frame, width=50, height=4, wrap="word")
+        notes_entry.grid(row=1, column=1, sticky="w", padx=(20, 0))
+        notes_entry.insert("1.0", "Enter notes here (optional)")
 
         # Treeview row styling for odd rows
         style = ttk.Style()
@@ -1220,6 +1196,6 @@ class ScheduleWindow:
         # Load existing employees
         load_employees()
 if __name__ == "__main__":
-    root = tk.Tk()
     app = ScheduleWindow(root)
     root.mainloop()
+    print("Application closed.")
