@@ -199,13 +199,13 @@ class Schedule:
         print("Unassigned employees refreshed.")
 class ScheduleWindow:
     def __init__(self, master):
+
         # Master window
         self.master = master
         self.master.deiconify()
         self.master.title("Schedule Management")
         self.master.rowconfigure(0, weight=1)
         self.master.columnconfigure(0, weight=1)
-
         self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self.app_container = ttk.Frame(self.master, padding="0") # Use ttk.Frame
@@ -250,8 +250,13 @@ class ScheduleWindow:
         self.employee_manager_button = ttk.Button(top_frame, text="Manage Employees", command=self.open_manage_employees_window)
         self.employee_manager_button.grid(row=0, column=4, rowspan=2, padx=5, pady=5)
 
-        toggle_btn = ttk.Button(top_frame, text="Toggle Theme", command=self.toggle_theme)
-        toggle_btn.grid(row=0, column=5, rowspan=2, padx=5, pady=5)
+        style_toggle = ttk.Style()
+        style_toggle.layout("Toggle.TButton", [("Checkbutton.padding", {"children": [("Checkbutton.indicator", {"side": "left"}),
+                            ("Checkbutton.label", {"side": "left", "expand": True})],"sticky": "nswe"})])
+        style_toggle.configure("Toggle.TButton", font=("Segoe UI", 10), padding=6)
+        self.theme_var = tk.IntVar(value=0)  # 0 = light, 1 = dark
+        toggle_button = ttk.Checkbutton(top_frame, text='Toggle theme', style='Toggle.TButton', variable=self.theme_var, command=self.toggle_theme)
+        toggle_button.grid(row=0, column=5, rowspan=2, padx=5, pady=5)
 
         # Main frame
         main_frame = ttk.Frame(self.app_container)
@@ -309,7 +314,7 @@ class ScheduleWindow:
             self.finalized_tree.column(day, width=80, anchor="center", stretch=True)
         self.finalized_tree.tag_configure('oddrow', background='#AAC1DC')
         self.finalized_tree.tag_configure('evenrow', background='#ffffff')
-        self.finalized_tree.tag_configure('highlight', background='lightblue')
+        self.finalized_tree.tag_configure('highlight', foreground='blue', font=('Segoe UI', 10, 'bold'))
         self.finalized_tree.bind("<Double-1>", self.on_final_schedule_double_click)
         self.finalized_tree.bind("<Button-1>", self.on_final_schedule_single_click)
 
@@ -335,8 +340,12 @@ class ScheduleWindow:
         self.employee_list_tree.column("Notes", width=200, anchor="w", stretch=True)
         self.employee_list_tree.tag_configure('oddrow', background='#AAC1DC')
         self.employee_list_tree.tag_configure('evenrow', background='#ffffff')
-
+        # First, bind the drag start. Your log shows drag-related prints ("Assigned Ben Berryhill..."),
+        # which implies on_drag_start_employee_list IS being called correctly.
         self.employee_list_tree.bind("<ButtonPress-1>", self.on_drag_start_employee_list)
+        # THEN, ADD the new single click handler to the SAME event sequence.
+        # Use "<ButtonPress-1>" to match the event that we know is working for drag.
+        self.employee_list_tree.bind("<ButtonPress-1>", self.on_employee_list_single_click, add='+') # Ensures this is ADDED, not replacing.
 
         # Set Employees Needed Frame
         set_employees_needed_frame = ttk.Frame(main_frame)
@@ -344,7 +353,7 @@ class ScheduleWindow:
 
         # Set Employees Needed Label
         set_employees_needed_label = ttk.Label(set_employees_needed_frame, text="Set Employees Needed", font=("Arial", 12, "bold"))
-        set_employees_needed_label.grid(row=0, column=0, columnspan=15, rowspan=2, sticky="w", pady=(0, 35))
+        set_employees_needed_label.grid(row=0, column=0, columnspan=15, rowspan=2, sticky="w", pady=(0, 45))
 
         # Entries for Each Day (placed in two rows if needed)
         self.employees_needed_entries = {}
@@ -392,28 +401,52 @@ class ScheduleWindow:
         self.refresh_employee_list_tree()
         self.refresh_unassigned_employees() 
         self.refresh_finalized_schedule()
+        self.toggle_theme()
 
     def on_closing(self):
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
             self.master.destroy()
 
     def toggle_theme(self):
-        # This now uses the Tcl proc 'set_theme' defined in azure.tcl
         try:
-            s = ttk.Style()
-            current_ttk_theme = s.theme_use()
-            
-            print(f"Current Ttk theme for toggle: {current_ttk_theme}")
-
-            if "dark" in current_ttk_theme.lower():
-                self.master.tk.call("set_theme", "light")
-                print("Called Tcl proc: set_theme light")
-            else:
+            if self.theme_var.get() == 1:
                 self.master.tk.call("set_theme", "dark")
-                print("Called Tcl proc: set_theme dark")
+                bg = "#2e2e2e"  # dark background
+                fg = "#ffffff"
+            else:
+                self.master.tk.call("set_theme", "light")
+                bg = "#ffffff"
+                fg = "#000000"
+
+            # Reapply custom toggle style after theme switch
+            self.apply_toggle_style()
+
+            # Apply style updates to all Treeviews
+            for tree in [self.unassigned_tree, self.finalized_tree, self.employee_list_tree]:
+                style = ttk.Style(tree)
+                style.configure("Treeview", background=bg, foreground=fg, fieldbackground=bg)
+                style.map("Treeview", background=[("selected", "#4a6984")], foreground=[("selected", "#ffffff")])
+
+                # Reapply tag configs to match new theme
+                tree.tag_configure('oddrow', background="#4a4a4a" if self.theme_var.get() else "#AAC1DC", foreground=fg)
+                tree.tag_configure('evenrow', background="#2e2e2e" if self.theme_var.get() else "#ffffff", foreground=fg)
+                tree.tag_configure('highlight', background='darkblue' if self.theme_var.get() else 'lightblue', foreground=fg)
+
         except tk.TclError as e:
-            messagebox.showerror("Theme Error", f"Could not switch theme via Tcl 'set_theme'.\nError: {e}")
-            print(f"Error toggling theme via Tcl: {e}")
+            messagebox.showerror("Theme Error", f"Could not switch theme.\n{e}")
+
+    def apply_toggle_style(self):
+        style_toggle = ttk.Style()
+        style_toggle.layout("Toggle.TButton", [
+            ("Checkbutton.padding", {
+                "children": [
+                    ("Checkbutton.indicator", {"side": "left"}),
+                    ("Checkbutton.label", {"side": "left", "expand": True})
+                ],
+                "sticky": "nswe"
+            })
+        ])
+        style_toggle.configure("Toggle.TButton", font=("Segoe UI", 10), padding=6)
 
     def on_drag_start_unassigned(self, event):
         item_id = self.unassigned_tree.identify_row(event.y)
@@ -623,6 +656,53 @@ class ScheduleWindow:
         if messagebox.askyesno("Manual Assignment", f"Do you want to manually add {selected_employee_object.name} to {selected_day}?"):
             self.assign_employee_to_final_schedule(selected_employee_object, selected_day, method="double-click from unassigned")
 
+    def _highlight_employee_in_finalized_tree(self, employee_name_to_highlight):
+        print(f"[_highlight_employee_in_finalized_tree] Attempting to highlight: '{employee_name_to_highlight}'") # DEBUG
+        treeview = self.finalized_tree
+        children = treeview.get_children()
+        if not children:
+            print ("[_highlight_employee_in_finalized_tree] No children in finalized_tree to highlight.") # DEBUG
+            return
+
+        base_tags_per_item = {}
+        for i, child_id in enumerate(children):
+            base_tags_per_item[child_id] = 'oddrow' if i % 2 == 0 else 'evenrow'
+
+        # Reset all items to their base tags first
+        # print("[_highlight_employee_in_finalized_tree] Resetting all item tags...") # DEBUG (can be noisy)
+        for item_id in children:
+            treeview.item(item_id, tags=(base_tags_per_item[item_id],))
+
+        if not employee_name_to_highlight:
+            print("[_highlight_employee_in_finalized_tree] No employee name provided, highlights cleared.") # DEBUG
+            return
+
+        print(f"[_highlight_employee_in_finalized_tree] Searching for '{employee_name_to_highlight}' to apply highlight:") # DEBUG
+        highlight_applied_count = 0
+        for child_id in children:
+            current_values = treeview.item(child_id, 'values')
+            # print(f"  Checking item {child_id}, values: {current_values}") # DEBUG (can be very noisy)
+            if current_values and len(current_values) > 1:
+                found_in_row = False
+                # Compare names, stripping whitespace for robustness
+                for name_in_cell in current_values[1:]: # Skip row number column value
+                    if str(name_in_cell).strip() == str(employee_name_to_highlight).strip():
+                        found_in_row = True
+                        break
+                
+                if found_in_row:
+                    new_tags = (base_tags_per_item[child_id], 'highlight')
+                    print(f"  HIGHLIGHTING item {child_id} (Values: {current_values}) with tags {new_tags} for employee '{employee_name_to_highlight}'") # DEBUG
+                    treeview.item(child_id, tags=new_tags)
+                    print(f"  DEBUG: Tags on item {child_id} after setting: {treeview.item(child_id, 'tags')}") # DEBUG
+                    self.finalized_tree.update_idletasks()
+                    highlight_applied_count += 1
+        
+        if highlight_applied_count == 0:
+            print(f"[_highlight_employee_in_finalized_tree] Employee '{employee_name_to_highlight}' not found in any row of finalized_tree.") # DEBUG
+        else:
+            print(f"[_highlight_employee_in_finalized_tree] Applied highlight to {highlight_applied_count} row(s) for '{employee_name_to_highlight}'.") # DEBUG
+
     def on_final_schedule_double_click(self, event):
         """Handle double-clicking on any employee in the final schedule to remove them."""
         item_id = self.finalized_tree.identify_row(event.y)
@@ -655,36 +735,77 @@ class ScheduleWindow:
             self.refresh_finalized_schedule()
 
     def on_final_schedule_single_click(self, event):
-        # Determine base tag for alternating colors before applying highlight
-        children = self.finalized_tree.get_children()
-        base_tags = {child_id: ('oddrow' if i % 2 == 0 else 'evenrow') for i, child_id in enumerate(children)}
-
-        for item_id in children:
-            self.finalized_tree.item(item_id, tags=(base_tags[item_id],)) # Reset to base tag
-
+        print(f"[on_final_schedule_single_click] Click detected. x={event.x}, y={event.y}") # DEBUG
         item_id = self.finalized_tree.identify_row(event.y)
         column_str = self.finalized_tree.identify_column(event.x)
+        region = self.finalized_tree.identify_region(event.x, event.y)
+        print(f"[on_final_schedule_single_click] Identified Item: {item_id}, Column_str: {column_str}, Region: {region}") # DEBUG
 
-        if not item_id or column_str == '#0': return # Click on header or empty space
+        if not item_id or region == "heading":
+            print("[on_final_schedule_single_click] Click on header or empty space. Clearing highlights.") # DEBUG
+            self._highlight_employee_in_finalized_tree(None)
+            return
 
-        column_index_tree = int(column_str.replace('#', '')) 
-        if column_index_tree <= 1: return # Click on row number column
+        if not column_str or column_str == '#0':
+            print("[on_final_schedule_single_click] Click on tree column (#0) or outside data columns. Clearing highlights.") # DEBUG
+            self._highlight_employee_in_finalized_tree(None)
+            return
+
+        column_index_tree = int(column_str.replace('#', ''))
+        print(f"[on_final_schedule_single_click] Column index (1-based for tree display): {column_index_tree}") # DEBUG
+        if column_index_tree <= 1: # Assuming column #1 is the 'Row' number
+            print("[on_final_schedule_single_click] Click on row number column. Clearing highlights.") # DEBUG
+            self._highlight_employee_in_finalized_tree(None)
+            return
 
         item_values = self.finalized_tree.item(item_id, 'values')
-        actual_data_column_index = column_index_tree - 1
-
-        if actual_data_column_index >= len(item_values): return # Click beyond data columns
+        print(f"[on_final_schedule_single_click] Item values: {item_values}") # DEBUG
         
-        selected_employee_name = item_values[actual_data_column_index]
-        if not selected_employee_name: return
+        actual_data_column_index = column_index_tree - 1 # Convert tree column index to item_values index
 
-        for child_id in children:
-            current_values = self.finalized_tree.item(child_id, 'values')
-            # Check if employee name is in any day column for this row (values[1] onwards)
-            if any(name == selected_employee_name for name in current_values[1:]):
-                # Append 'highlight' to existing base tag
-                new_tags = (base_tags[child_id], 'highlight')
-                self.finalized_tree.item(child_id, tags=new_tags)
+        selected_employee_name = None
+        if item_values and 0 <= actual_data_column_index < len(item_values):
+            selected_employee_name = item_values[actual_data_column_index]
+            print(f"[on_final_schedule_single_click] Selected employee name from cell: '{selected_employee_name}'") # DEBUG
+        else:
+            print(f"[on_final_schedule_single_click] Invalid column index for item_values or no item_values. Index: {actual_data_column_index}, Item values length: {len(item_values) if item_values else 'N/A'}") # DEBUG
+
+
+        if not selected_employee_name: 
+            print("[on_final_schedule_single_click] No employee name in cell (empty or error). Clearing highlights.") # DEBUG
+            self._highlight_employee_in_finalized_tree(None)
+            return
+
+        print(f"[on_final_schedule_single_click] Calling _highlight_employee_in_finalized_tree for: '{selected_employee_name}'") # DEBUG
+        self._highlight_employee_in_finalized_tree(selected_employee_name)
+
+    def on_employee_list_single_click(self, event):
+        print(f"[on_employee_list_single_click] Click detected. x={event.x}, y={event.y}") # DEBUG
+        region = self.employee_list_tree.identify_region(event.x, event.y)
+        item_id = self.employee_list_tree.identify_row(event.y)
+        print(f"[on_employee_list_single_click] Identified Region: {region}, Item_id: {item_id}") # DEBUG
+
+        if region == "heading":
+            print("[on_employee_list_single_click] Clicked on header. Clearing highlights.") # DEBUG
+            self._highlight_employee_in_finalized_tree(None)
+            return
+
+        if not item_id: 
+            print("[on_employee_list_single_click] Clicked outside of any item row. Clearing highlights.") # DEBUG
+            self._highlight_employee_in_finalized_tree(None)
+            return
+
+        item_values = self.employee_list_tree.item(item_id, 'values')
+        print(f"[on_employee_list_single_click] Item values: {item_values}") # DEBUG
+        
+        if not item_values or not item_values[0]: 
+            print("[on_employee_list_single_click] No item_values or employee name in item_values[0] is empty. Clearing highlights.") # DEBUG
+            self._highlight_employee_in_finalized_tree(None)
+            return
+
+        selected_employee_name = item_values[0]
+        print(f"[on_employee_list_single_click] Selected employee name: '{selected_employee_name}'. Calling _highlight_employee_in_finalized_tree.") # DEBUG
+        self.master.after_idle(self._highlight_employee_in_finalized_tree, selected_employee_name)
 
     def get_excel_files(self):
         """Retrieve all available Excel files for selection."""
